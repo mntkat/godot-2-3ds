@@ -4,6 +4,7 @@
 
 #include "lua_bridge.h"
 
+#include "image_ref.h"
 #include "input_event_ref.h"
 #include "lua_runtime.h"
 #include "script_object.h"
@@ -128,7 +129,7 @@ VariantBox *test_box(lua_State *L, int p_idx) {
 static Variant make_shared(const Variant &p_value) {
 
 	if (p_value.get_type() == Variant::ARRAY) {
-		Array src = p_value;
+		const Array src = p_value;
 		if (src.is_shared())
 			return p_value;
 		Array dst(true);
@@ -138,13 +139,13 @@ static Variant make_shared(const Variant &p_value) {
 		return dst;
 	}
 	if (p_value.get_type() == Variant::DICTIONARY) {
-		Dictionary src = p_value;
+		const Dictionary src = p_value;
 		if (src.is_shared())
 			return p_value;
 		Dictionary dst(true);
 		const Variant *k = NULL;
 		while ((k = src.next(k)))
-			dst[*k] = src[*k];
+			dst[*k] = src[*k]; // const access: no copy-on-write
 		return dst;
 	}
 	return p_value;
@@ -205,6 +206,11 @@ void push_typed(lua_State *L, const Variant &p_value) {
 			push_object(L, ev.ptr());
 			return;
 		}
+		case Variant::IMAGE: {
+			Ref<ImageRef> img = ImageRef::wrap(p_value);
+			push_object(L, img.ptr());
+			return;
+		}
 		default: break;
 	}
 
@@ -260,7 +266,9 @@ void push_script_value(lua_State *L, const Variant &p_value) {
 			return;
 		}
 		case Variant::INPUT_EVENT:
-			// Godot 4 events are objects; present Godot 2's the same way.
+		case Variant::IMAGE:
+			// Godot 4 events and images are objects; present Godot 2's the
+			// same way.
 			push_typed(L, p_value);
 			return;
 		default:
@@ -294,6 +302,10 @@ static Variant object_box_to_variant(const ObjectBox *p_box) {
 	const InputEventRef *ev = p_box->ref.is_valid() ? p_box->ref->cast_to<InputEventRef>() : NULL;
 	if (ev)
 		return ev->get_event();
+	// Likewise for Image values.
+	const ImageRef *img = p_box->ref.is_valid() ? p_box->ref->cast_to<ImageRef>() : NULL;
+	if (img)
+		return img->get_image();
 	if (p_box->ref.is_valid())
 		return Variant(p_box->ref);
 	return Variant(p_box->get());

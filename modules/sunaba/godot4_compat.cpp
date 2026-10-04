@@ -9,6 +9,9 @@
 #include "math_funcs.h"
 #include "object_type_db.h"
 #include "scene/2d/node_2d.h"
+#include "scene/gui/control.h"
+#include "scene/gui/popup_menu.h"
+#include "scene/gui/rich_text_label.h"
 #include "scene/3d/body_shape.h"
 #include "scene/3d/physics_body.h"
 #include "scene/resources/capsule_shape.h"
@@ -104,6 +107,9 @@ static const char *class_aliases[][2] = {
 	{ "Cubemap", "CubeMap" },
 	{ "FontFile", "DynamicFontData" },
 	{ "ViewportTexture", "RenderTargetTexture" },
+	{ "Image", "ImageRef" },
+	// Last, so a plain TextEdit still reports itself as TextEdit.
+	{ "CodeEdit", "TextEdit" },
 	{ NULL, NULL }
 };
 
@@ -1276,6 +1282,390 @@ G4_CALL(cb_apply_floor_snap) {
 	return Variant();
 }
 
+
+/* Control: Godot 4 anchors and offsets */
+
+// Godot 4 places each side at anchor * parent_size + offset, with anchors as
+// ratios. Godot 2 has an anchor mode per side and a margin whose meaning
+// depends on it: BEGIN (pos = m), END (pos = size - m), RATIO
+// (pos = m * size) and CENTER (pos = size / 2 - m). Ratios 0, 1 and 0.5 map
+// exactly; other ratios become RATIO anchors, which have no pixel offset, so
+// their offset is kept in metadata and only reported back.
+
+static float ctl_parent_range(Control *c, int p_side) {
+	if (!c->is_inside_tree())
+		return 0;
+	Size2 s = c->get_parent_area_size();
+	return (p_side & 1) ? s.y : s.x;
+}
+
+static String ratio_offset_key(int p_side) {
+	return "_g4_ratio_offset_" + itos(p_side);
+}
+
+static void ctl_get_side(Control *c, int p_side, float &r_anchor, float &r_offset) {
+	Margin m = (Margin)p_side;
+	float v = c->get_margin(m);
+	switch (c->get_anchor(m)) {
+		case Control::ANCHOR_BEGIN: r_anchor = 0; r_offset = v; break;
+		case Control::ANCHOR_END: r_anchor = 1; r_offset = -v; break;
+		case Control::ANCHOR_CENTER: r_anchor = 0.5; r_offset = -v; break;
+		case Control::ANCHOR_RATIO: {
+			r_anchor = v;
+			String key = ratio_offset_key(p_side);
+			r_offset = c->has_meta(key) ? (float)c->get_meta(key) : 0.0;
+		} break;
+	}
+}
+
+static void ctl_set_side(Control *c, int p_side, float p_anchor, float p_offset) {
+	Margin m = (Margin)p_side;
+	Control::AnchorType type;
+	float margin;
+	if (p_anchor == 0) {
+		type = Control::ANCHOR_BEGIN;
+		margin = p_offset;
+	} else if (p_anchor == 1) {
+		type = Control::ANCHOR_END;
+		margin = -p_offset;
+	} else if (p_anchor == 0.5) {
+		type = Control::ANCHOR_CENTER;
+		margin = -p_offset;
+	} else {
+		type = Control::ANCHOR_RATIO;
+		margin = p_anchor;
+	}
+	String key = ratio_offset_key(p_side);
+	if (type == Control::ANCHOR_RATIO && p_offset != 0)
+		c->set_meta(key, p_offset);
+	else if (c->has_meta(key))
+		c->set_meta(key, Variant());
+	c->set_anchor(m, type, true);
+	c->set_margin(m, margin);
+}
+
+// Godot 4 Control.set_anchor: without keep_offset the side stays in place.
+static void ctl_set_anchor(Control *c, int p_side, float p_anchor, bool p_keep_offset, bool p_push_opposite) {
+	float range = ctl_parent_range(c, p_side);
+	int opp = (p_side + 2) % 4;
+	float a, o, oa, oo;
+	ctl_get_side(c, p_side, a, o);
+	ctl_get_side(c, opp, oa, oo);
+	float prev_pos = o + a * range;
+	float prev_opp_pos = oo + oa * range;
+	a = p_anchor;
+	bool opp_changed = false;
+	if (p_push_opposite && ((p_side < 2 && a > oa) || (p_side >= 2 && a < oa))) {
+		oa = a;
+		opp_changed = true;
+	}
+	if (!p_keep_offset) {
+		o = prev_pos - a * range;
+		if (opp_changed)
+			oo = prev_opp_pos - oa * range;
+	}
+	ctl_set_side(c, p_side, a, o);
+	if (opp_changed)
+		ctl_set_side(c, opp, oa, oo);
+}
+
+#define CTL_SIDE(m_side, m_name)                                           \
+	G4_GET(ctl_get_anchor_##m_name) {                                      \
+		Control *c = o->cast_to<Control>();                                \
+		float a, off;                                                      \
+		ctl_get_side(c, m_side, a, off);                                   \
+		return a;                                                          \
+	}                                                                      \
+	G4_SET(ctl_set_anchor_##m_name) {                                      \
+		ctl_set_anchor(o->cast_to<Control>(), m_side, v, false, true);     \
+	}                                                                      \
+	G4_GET(ctl_get_offset_##m_name) {                                      \
+		Control *c = o->cast_to<Control>();                                \
+		float a, off;                                                      \
+		ctl_get_side(c, m_side, a, off);                                   \
+		return off;                                                        \
+	}                                                                      \
+	G4_SET(ctl_set_offset_##m_name) {                                      \
+		Control *c = o->cast_to<Control>();                                \
+		float a, off;                                                      \
+		ctl_get_side(c, m_side, a, off);                                   \
+		ctl_set_side(c, m_side, a, v);                                     \
+	}
+
+CTL_SIDE(MARGIN_LEFT, left)
+CTL_SIDE(MARGIN_TOP, top)
+CTL_SIDE(MARGIN_RIGHT, right)
+CTL_SIDE(MARGIN_BOTTOM, bottom)
+
+G4_CALL(ctl_get_anchor) {
+	float a, off;
+	ctl_get_side(o->cast_to<Control>(), CLAMP((int)arg(args, 0), 0, 3), a, off);
+	return a;
+}
+G4_CALL(ctl_set_anchor) {
+	ctl_set_anchor(o->cast_to<Control>(), CLAMP((int)arg(args, 0), 0, 3), arg(args, 1), arg(args, 2, false), arg(args, 3, true));
+	return Variant();
+}
+G4_CALL(ctl_get_offset) {
+	float a, off;
+	ctl_get_side(o->cast_to<Control>(), CLAMP((int)arg(args, 0), 0, 3), a, off);
+	return off;
+}
+G4_CALL(ctl_set_offset) {
+	Control *c = o->cast_to<Control>();
+	int side = CLAMP((int)arg(args, 0), 0, 3);
+	float a, off;
+	ctl_get_side(c, side, a, off);
+	ctl_set_side(c, side, a, arg(args, 1));
+	return Variant();
+}
+G4_CALL(ctl_set_anchor_and_offset) {
+	Control *c = o->cast_to<Control>();
+	int side = CLAMP((int)arg(args, 0), 0, 3);
+	ctl_set_anchor(c, side, arg(args, 1), false, arg(args, 3, false));
+	float a, off;
+	ctl_get_side(c, side, a, off);
+	ctl_set_side(c, side, a, arg(args, 2));
+	return Variant();
+}
+
+// Godot 4 LayoutPreset
+enum {
+	PRESET_TOP_LEFT,
+	PRESET_TOP_RIGHT,
+	PRESET_BOTTOM_LEFT,
+	PRESET_BOTTOM_RIGHT,
+	PRESET_CENTER_LEFT,
+	PRESET_CENTER_TOP,
+	PRESET_CENTER_RIGHT,
+	PRESET_CENTER_BOTTOM,
+	PRESET_CENTER,
+	PRESET_LEFT_WIDE,
+	PRESET_TOP_WIDE,
+	PRESET_RIGHT_WIDE,
+	PRESET_BOTTOM_WIDE,
+	PRESET_VCENTER_WIDE,
+	PRESET_HCENTER_WIDE,
+	PRESET_FULL_RECT,
+};
+
+// Anchor of each side (left, top, right, bottom) for a preset, as in Godot 4.
+static float preset_anchor(int p_preset, int p_side) {
+	switch (p_side) {
+		case 0:
+			switch (p_preset) {
+				case PRESET_CENTER_TOP: case PRESET_CENTER_BOTTOM: case PRESET_CENTER: case PRESET_VCENTER_WIDE: return 0.5;
+				case PRESET_TOP_RIGHT: case PRESET_BOTTOM_RIGHT: case PRESET_CENTER_RIGHT: case PRESET_RIGHT_WIDE: return 1;
+				default: return 0;
+			}
+		case 1:
+			switch (p_preset) {
+				case PRESET_CENTER_LEFT: case PRESET_CENTER_RIGHT: case PRESET_CENTER: case PRESET_HCENTER_WIDE: return 0.5;
+				case PRESET_BOTTOM_LEFT: case PRESET_BOTTOM_RIGHT: case PRESET_CENTER_BOTTOM: case PRESET_BOTTOM_WIDE: return 1;
+				default: return 0;
+			}
+		case 2:
+			switch (p_preset) {
+				case PRESET_TOP_LEFT: case PRESET_BOTTOM_LEFT: case PRESET_CENTER_LEFT: case PRESET_LEFT_WIDE: return 0;
+				case PRESET_CENTER_TOP: case PRESET_CENTER_BOTTOM: case PRESET_CENTER: case PRESET_VCENTER_WIDE: return 0.5;
+				default: return 1;
+			}
+		default:
+			switch (p_preset) {
+				case PRESET_TOP_LEFT: case PRESET_TOP_RIGHT: case PRESET_CENTER_TOP: case PRESET_TOP_WIDE: return 0;
+				case PRESET_CENTER_LEFT: case PRESET_CENTER_RIGHT: case PRESET_CENTER: case PRESET_HCENTER_WIDE: return 0.5;
+				default: return 1;
+			}
+	}
+}
+
+static void ctl_set_anchors_preset(Control *c, int p_preset, bool p_keep_offsets) {
+	for (int side = 0; side < 4; side++)
+		ctl_set_anchor(c, side, preset_anchor(p_preset, side), p_keep_offsets, false);
+}
+
+// Godot 4 LayoutPresetMode
+enum { PRESET_MODE_MINSIZE, PRESET_MODE_KEEP_WIDTH, PRESET_MODE_KEEP_HEIGHT, PRESET_MODE_KEEP_SIZE };
+
+static void ctl_set_offsets_preset(Control *c, int p_preset, int p_mode, float p_margin) {
+	Size2 size = c->get_size();
+	Size2 min_size = c->get_combined_minimum_size();
+	if (p_mode == PRESET_MODE_MINSIZE || p_mode == PRESET_MODE_KEEP_HEIGHT)
+		size.x = min_size.x;
+	if (p_mode == PRESET_MODE_MINSIZE || p_mode == PRESET_MODE_KEEP_WIDTH)
+		size.y = min_size.y;
+	Size2 parent = c->is_inside_tree() ? c->get_parent_area_size() : Size2();
+	float anchor[4], offset[4];
+	for (int side = 0; side < 4; side++)
+		ctl_get_side(c, side, anchor[side], offset[side]);
+	for (int side = 0; side < 4; side++) {
+		float range = (side & 1) ? parent.y : parent.x;
+		float extent = (side & 1) ? size.y : size.x;
+		float target = preset_anchor(p_preset, side);
+		// Where the preset puts the side, relative to its anchor point.
+		float rel;
+		if (side < 2)
+			rel = target == 0 ? p_margin : (target == 1 ? -extent - p_margin : -extent / 2);
+		else
+			rel = target == 0 ? extent + p_margin : (target == 1 ? -p_margin : extent / 2);
+		offset[side] = range * (target - anchor[side]) + rel;
+		ctl_set_side(c, side, anchor[side], offset[side]);
+	}
+}
+
+G4_CALL(ctl_set_anchors_preset) {
+	ctl_set_anchors_preset(o->cast_to<Control>(), arg(args, 0), arg(args, 1, false));
+	return Variant();
+}
+G4_CALL(ctl_set_offsets_preset) {
+	ctl_set_offsets_preset(o->cast_to<Control>(), arg(args, 0), arg(args, 1, PRESET_MODE_MINSIZE), arg(args, 2, 0));
+	return Variant();
+}
+G4_CALL(ctl_set_anchors_and_offsets_preset) {
+	Control *c = o->cast_to<Control>();
+	ctl_set_anchors_preset(c, arg(args, 0), false);
+	ctl_set_offsets_preset(c, arg(args, 0), arg(args, 1, PRESET_MODE_MINSIZE), arg(args, 2, 0));
+	return Variant();
+}
+G4_CALL(ctl_get_screen_position) { return call0(o, "get_global_pos"); }
+G4_CALL(ctl_get_theme_font_size) { return 16; }
+// Godot 2 removes a resource override when it is set to null; constant and
+// color overrides cannot be removed.
+G4_CALL(ctl_remove_theme_icon_override) { return call2(o, "add_icon_override", arg(args, 0), Variant()); }
+G4_CALL(ctl_remove_theme_stylebox_override) { return call2(o, "add_style_override", arg(args, 0), Variant()); }
+G4_CALL(ctl_remove_theme_font_override) { return call2(o, "add_font_override", arg(args, 0), Variant()); }
+G4_CALL(ctl_update_minimum_size) { return call0(o, "minimum_size_changed"); }
+
+// Godot 4 SizeFlags: FILL 1, EXPAND 2, SHRINK_CENTER 4, SHRINK_END 8.
+// Godot 2: EXPAND 1, FILL 2, no shrink flags.
+static int size_flags_to_godot2(int f) { return ((f & 1) ? 2 : 0) | ((f & 2) ? 1 : 0); }
+static int size_flags_from_godot2(int f) { return ((f & 2) ? 1 : 0) | ((f & 1) ? 2 : 0); }
+G4_GET(ctl_get_size_flags_horizontal) { return size_flags_from_godot2(call0(o, "get_h_size_flags")); }
+G4_SET(ctl_set_size_flags_horizontal) { call1(o, "set_h_size_flags", size_flags_to_godot2(v)); }
+G4_GET(ctl_get_size_flags_vertical) { return size_flags_from_godot2(call0(o, "get_v_size_flags")); }
+G4_SET(ctl_set_size_flags_vertical) { call1(o, "set_v_size_flags", size_flags_to_godot2(v)); }
+
+G4_GET(ctl_get_mouse_filter) {
+	// Godot 4 MOUSE_FILTER_STOP 0, PASS 1, IGNORE 2
+	if ((bool)call0(o, "is_ignoring_mouse"))
+		return 2;
+	return (bool)call0(o, "is_stopping_mouse") ? 0 : 1;
+}
+G4_SET(ctl_set_mouse_filter) {
+	int f = v;
+	call1(o, "set_ignore_mouse", f == 2);
+	call1(o, "set_stop_mouse", f == 0);
+}
+
+#define CTL_FOCUS_NEIGHBOR(m_name, m_margin)                                    \
+	G4_GET(ctl_get_##m_name) { return call1(o, "get_focus_neighbour", m_margin); } \
+	G4_SET(ctl_set_##m_name) { call2(o, "set_focus_neighbour", m_margin, NodePath(String(v))); }
+CTL_FOCUS_NEIGHBOR(focus_neighbor_left, MARGIN_LEFT)
+CTL_FOCUS_NEIGHBOR(focus_neighbor_top, MARGIN_TOP)
+CTL_FOCUS_NEIGHBOR(focus_neighbor_right, MARGIN_RIGHT)
+CTL_FOCUS_NEIGHBOR(focus_neighbor_bottom, MARGIN_BOTTOM)
+
+/* Object */
+
+// Godot 4 property dictionaries carry the class of object properties in
+// "class_name"; Godot 2 has it only as a resource type hint.
+G4_CALL(obj_get_property_list) {
+	List<PropertyInfo> plist;
+	o->get_property_list(&plist);
+	Array out;
+	for (List<PropertyInfo>::Element *E = plist.front(); E; E = E->next()) {
+		const PropertyInfo &pi = E->get();
+		Dictionary d;
+		d["name"] = pi.name;
+		d["type"] = pi.type;
+		d["hint"] = pi.hint;
+		d["hint_string"] = pi.hint_string;
+		d["usage"] = pi.usage;
+		String cls;
+		if (pi.type == Variant::OBJECT && pi.hint == PROPERTY_HINT_RESOURCE_TYPE)
+			cls = pi.hint_string;
+		d["class_name"] = cls;
+		out.push_back(d);
+	}
+	return out;
+}
+
+/* GUI widgets */
+
+// Godot 4's text is the BBCode source when bbcode_enabled is set.
+G4_GET(rtl_get_text) {
+	if ((bool)call0(o, "is_using_bbcode"))
+		return call0(o, "get_bbcode");
+	return o->has_meta("_g4_text") ? o->get_meta("_g4_text") : call0(o, "get_text");
+}
+G4_SET(rtl_set_text) {
+	String text = v;
+	if ((bool)call0(o, "is_using_bbcode")) {
+		call1(o, "set_bbcode", text);
+	} else {
+		call0(o, "clear");
+		call1(o, "add_text", text);
+		o->set_meta("_g4_text", text);
+	}
+}
+G4_SET(rtl_set_bbcode_enabled) {
+	String text = rtl_get_text(o);
+	call1(o, "set_use_bbcode", v);
+	rtl_set_text(o, text);
+}
+G4_CALL(rtl_append_text) {
+	if ((bool)call0(o, "is_using_bbcode"))
+		return call1(o, "append_bbcode", arg(args, 0));
+	return call1(o, "add_text", arg(args, 0));
+}
+G4_CALL(rtl_get_parsed_text) { return call0(o, "get_text"); }
+
+G4_CALL(popup_add_separator) { return call0(o, "add_separator"); }
+G4_CALL(popup_add_item) {
+	// Godot 4: add_item(label, id = -1, accel = 0)
+	return call3(o, "add_item", arg(args, 0), arg(args, 1, -1), arg(args, 2, 0));
+}
+G4_CALL(popup_add_icon_item) {
+	PopupMenu *pm = o->cast_to<PopupMenu>();
+	pm->add_icon_item(arg(args, 0), arg(args, 1), arg(args, 2, -1), arg(args, 3, 0));
+	return Variant();
+}
+G4_CALL(popup_add_check_item) {
+	return call3(o, "add_check_item", arg(args, 0), arg(args, 1, -1), arg(args, 2, 0));
+}
+G4_CALL(popup_set_item_checkable) { return call2(o, "set_item_as_checkable", arg(args, 0), arg(args, 1)); }
+G4_CALL(popup_set_item_id) { return call2(o, "set_item_ID", arg(args, 0), arg(args, 1)); }
+G4_CALL(popup_get_item_id) { return call1(o, "get_item_ID", arg(args, 0)); }
+G4_CALL(popup_set_item_as_separator) { return call2(o, "set_item_as_separator", arg(args, 0), arg(args, 1)); }
+
+// Godot 2's OptionButton keeps its PopupMenu private; it is its only
+// PopupMenu child.
+G4_CALL(option_get_popup) {
+	Node *n = o->cast_to<Node>();
+	for (int i = 0; n && i < n->get_child_count(); i++) {
+		if (n->get_child(i)->cast_to<PopupMenu>())
+			return n->get_child(i);
+	}
+	return Variant();
+}
+
+G4_GET(scroll_get_h_mode) { return (bool)call0(o, "is_h_scroll_enabled") ? 1 : 0; } // AUTO : DISABLED
+G4_SET(scroll_set_h_mode) { call1(o, "set_enable_h_scroll", (int)v != 0); }
+G4_GET(scroll_get_v_mode) { return (bool)call0(o, "is_v_scroll_enabled") ? 1 : 0; }
+G4_SET(scroll_set_v_mode) { call1(o, "set_enable_v_scroll", (int)v != 0); }
+
+G4_GET(textedit_get_editable) { return !(o->has_meta("_g4_readonly") && (bool)o->get_meta("_g4_readonly")); }
+G4_SET(textedit_set_editable) {
+	o->set_meta("_g4_readonly", !(bool)v);
+	call1(o, "set_readonly", !(bool)v);
+}
+G4_CALL(textedit_get_caret_line) { return call0(o, "cursor_get_line"); }
+G4_CALL(textedit_get_caret_column) { return call0(o, "cursor_get_column"); }
+G4_CALL(textedit_set_caret_line) { return call2(o, "cursor_set_line", arg(args, 0), arg(args, 1, true)); }
+G4_CALL(textedit_set_caret_column) { return call2(o, "cursor_set_column", arg(args, 0), arg(args, 1, true)); }
+G4_CALL(textedit_get_selected_text) { return call0(o, "get_selection_text"); }
+G4_CALL(textedit_has_selection) { return call0(o, "is_selection_active"); }
+
 /* Tables */
 
 typedef Variant (*Getter)(Object *);
@@ -1440,6 +1830,101 @@ static const PropEntry props[] = {
 	{ "Node2D", "global_rotation_degrees", NULL, NULL, n2d_get_global_rotation_degrees, n2d_set_global_rotation_degrees },
 	{ "Node2D", "z_index", "get_z", "set_z", NULL, NULL },
 	{ "Node2D", "z_as_relative", "is_z_relative", "set_z_as_relative", NULL, NULL },
+	// RichTextLabel, ScrollContainer, TextEdit
+	{ "RichTextLabel", "text", NULL, NULL, rtl_get_text, rtl_set_text },
+	{ "RichTextLabel", "bbcode_enabled", "is_using_bbcode", NULL, NULL, rtl_set_bbcode_enabled },
+	{ "RichTextLabel", "scroll_following", "is_scroll_following", "set_scroll_follow", NULL, NULL },
+	{ "RichTextLabel", "scroll_active", "is_scroll_active", "set_scroll_active", NULL, NULL },
+	{ "RichTextLabel", "selection_enabled", "is_selection_enabled", "set_selection_enabled", NULL, NULL },
+	{ "RichTextLabel", "meta_underlined", "is_meta_underlined", "set_meta_underline", NULL, NULL },
+	{ "RichTextLabel", "tab_size", "get_tab_size", "set_tab_size", NULL, NULL },
+	{ "RichTextLabel", "visible_characters", "get_visible_characters", "set_visible_characters", NULL, NULL },
+	{ "ScrollContainer", "horizontal_scroll_mode", NULL, NULL, scroll_get_h_mode, scroll_set_h_mode },
+	{ "ScrollContainer", "vertical_scroll_mode", NULL, NULL, scroll_get_v_mode, scroll_set_v_mode },
+	{ "ScrollContainer", "scroll_horizontal", "get_h_scroll", "set_h_scroll", NULL, NULL },
+	{ "ScrollContainer", "scroll_vertical", "get_v_scroll", "set_v_scroll", NULL, NULL },
+	{ "ScrollContainer", "scroll_deadzone", "get_deadzone", "set_deadzone", NULL, NULL },
+	{ "TextEdit", "editable", NULL, NULL, textedit_get_editable, textedit_set_editable },
+	{ "TextEdit", "syntax_highlighter", NULL, NULL, NULL, ignore_set },
+	{ "TextEdit", "highlight_all_occurrences", "is_highlight_all_occurrences_enabled", "set_highlight_all_occurrences", NULL, NULL },
+	{ "TextEdit", "caret_blink", "cursor_get_blink_enabled", "cursor_set_blink_enabled", NULL, NULL },
+	{ "TextEdit", "caret_blink_interval", "cursor_get_blink_speed", "cursor_set_blink_speed", NULL, NULL },
+	{ "TextEdit", "gutters_draw_line_numbers", "is_show_line_numbers_enabled", "set_show_line_numbers", NULL, NULL },
+	// Line edits, buttons, labels, ranges
+	{ "LineEdit", "placeholder_text", "get_placeholder", "set_placeholder", NULL, NULL },
+	{ "LineEdit", "caret_column", "get_cursor_pos", "set_cursor_pos", NULL, NULL },
+	{ "LineEdit", "secret", "is_secret", "set_secret", NULL, NULL },
+	{ "LineEdit", "alignment", "get_align", "set_align", NULL, NULL },
+	{ "LineEdit", "caret_blink", "cursor_get_blink_enabled", "cursor_set_blink_enabled", NULL, NULL },
+	{ "Button", "icon", "get_button_icon", "set_button_icon", NULL, NULL },
+	{ "Button", "alignment", "get_text_align", "set_text_align", NULL, NULL },
+	{ "Button", "clip_text", "get_clip_text", "set_clip_text", NULL, NULL },
+	{ "BaseButton", "button_pressed", "is_pressed", "set_pressed", NULL, NULL },
+	{ "BaseButton", "action_mode", NULL, NULL, NULL, ignore_set },
+	{ "Label", "horizontal_alignment", "get_align", "set_align", NULL, NULL },
+	{ "Label", "vertical_alignment", "get_valign", "set_valign", NULL, NULL },
+	{ "Label", "clip_text", "is_clipping_text", "set_clip_text", NULL, NULL },
+	{ "Label", "max_lines_visible", "get_max_lines_visible", "set_max_lines_visible", NULL, NULL },
+	{ "Label", "lines_skipped", "get_lines_skipped", "set_lines_skipped", NULL, NULL },
+	{ "Label", "uppercase", "is_uppercase", "set_uppercase", NULL, NULL },
+	{ "ProgressBar", "show_percentage", "is_percent_visible", "set_percent_visible", NULL, NULL },
+	{ "Range", "value", "get_val", "set_val", NULL, NULL },
+	{ "Range", "min_value", "get_min", "set_min", NULL, NULL },
+	{ "Range", "max_value", "get_max", "set_max", NULL, NULL },
+	{ "Range", "rounded", "is_rounded_values", "set_rounded_values", NULL, NULL },
+	{ "Range", "exp_edit", "is_unit_value_exp", "set_exp_unit_value", NULL, NULL },
+	{ "Range", "page", "get_page", "set_page", NULL, NULL },
+	{ "SplitContainer", "collapsed", "is_collapsed", "set_collapsed", NULL, NULL },
+	{ "SplitContainer", "dragger_visibility", "get_dragger_visibility", "set_dragger_visibility", NULL, NULL },
+	{ "TabContainer", "tabs_visible", "are_tabs_visible", "set_tabs_visible", NULL, NULL },
+	{ "TabContainer", "tab_alignment", "get_tab_align", "set_tab_align", NULL, NULL },
+	{ "Tree", "hide_root", NULL, "set_hide_root", NULL, NULL },
+	{ "Tree", "hide_folding", "is_folding_hidden", "set_hide_folding", NULL, NULL },
+	{ "Tree", "column_titles_visible", "are_column_titles_visible", "set_column_titles_visible", NULL, NULL },
+	{ "Tree", "allow_rmb_select", "get_allow_rmb_select", "set_allow_rmb_select", NULL, NULL },
+	{ "ItemList", "same_column_width", "is_same_column_width", "set_same_column_width", NULL, NULL },
+	{ "ItemList", "allow_rmb_select", "get_allow_rmb_select", "set_allow_rmb_select", NULL, NULL },
+	{ "PopupMenu", "item_count", "get_item_count", NULL, NULL, ignore_set },
+	{ "PopupMenu", "hide_on_item_selection", "is_hide_on_item_selection", "set_hide_on_item_selection", NULL, NULL },
+	{ "OptionButton", "item_count", "get_item_count", NULL, NULL, ignore_set },
+	{ "OptionButton", "selected", "get_selected", "select", NULL, NULL },
+	{ "TextureFrame", "expand", "has_expand", "set_expand", NULL, NULL },
+	{ "Popup", "exclusive", "is_exclusive", "set_exclusive", NULL, NULL },
+	{ "WindowDialog", "title", "get_title", "set_title", NULL, NULL },
+	{ "AcceptDialog", "dialog_text", "get_text", "set_text", NULL, NULL },
+	{ "AcceptDialog", "dialog_hide_on_ok", "get_hide_on_ok", "set_hide_on_ok", NULL, NULL },
+	// Control
+	{ "Control", "anchor_left", NULL, NULL, ctl_get_anchor_left, ctl_set_anchor_left },
+	{ "Control", "anchor_top", NULL, NULL, ctl_get_anchor_top, ctl_set_anchor_top },
+	{ "Control", "anchor_right", NULL, NULL, ctl_get_anchor_right, ctl_set_anchor_right },
+	{ "Control", "anchor_bottom", NULL, NULL, ctl_get_anchor_bottom, ctl_set_anchor_bottom },
+	{ "Control", "offset_left", NULL, NULL, ctl_get_offset_left, ctl_set_offset_left },
+	{ "Control", "offset_top", NULL, NULL, ctl_get_offset_top, ctl_set_offset_top },
+	{ "Control", "offset_right", NULL, NULL, ctl_get_offset_right, ctl_set_offset_right },
+	{ "Control", "offset_bottom", NULL, NULL, ctl_get_offset_bottom, ctl_set_offset_bottom },
+	{ "Control", "custom_minimum_size", "get_custom_minimum_size", "set_custom_minimum_size", NULL, NULL },
+	{ "Control", "position", "get_pos", "set_pos", NULL, NULL },
+	{ "Control", "global_position", "get_global_pos", "set_global_pos", NULL, NULL },
+	{ "Control", "size", "get_size", "set_size", NULL, NULL },
+	{ "Control", "rotation", "get_rotation", "set_rotation", NULL, NULL },
+	{ "Control", "rotation_degrees", "get_rotation_deg", "set_rotation_deg", NULL, NULL },
+	{ "Control", "scale", "get_scale", "set_scale", NULL, NULL },
+	{ "Control", "tooltip_text", "get_tooltip", "set_tooltip", NULL, NULL },
+	{ "Control", "mouse_filter", NULL, NULL, ctl_get_mouse_filter, ctl_set_mouse_filter },
+	{ "Control", "mouse_default_cursor_shape", "get_default_cursor_shape", "set_default_cursor_shape", NULL, NULL },
+	{ "Control", "size_flags_horizontal", NULL, NULL, ctl_get_size_flags_horizontal, ctl_set_size_flags_horizontal },
+	{ "Control", "size_flags_vertical", NULL, NULL, ctl_get_size_flags_vertical, ctl_set_size_flags_vertical },
+	{ "Control", "size_flags_stretch_ratio", "get_stretch_ratio", "set_stretch_ratio", NULL, NULL },
+	{ "Control", "focus_neighbor_left", NULL, NULL, ctl_get_focus_neighbor_left, ctl_set_focus_neighbor_left },
+	{ "Control", "focus_neighbor_top", NULL, NULL, ctl_get_focus_neighbor_top, ctl_set_focus_neighbor_top },
+	{ "Control", "focus_neighbor_right", NULL, NULL, ctl_get_focus_neighbor_right, ctl_set_focus_neighbor_right },
+	{ "Control", "focus_neighbor_bottom", NULL, NULL, ctl_get_focus_neighbor_bottom, ctl_set_focus_neighbor_bottom },
+	// CanvasItem
+	{ "CanvasItem", "visible", NULL, NULL, spatial_get_visible, spatial_set_visible },
+	{ "CanvasItem", "top_level", "is_set_as_toplevel", "set_as_toplevel", NULL, NULL },
+	{ "CanvasItem", "show_behind_parent", "is_draw_behind_parent_enabled", "set_draw_behind_parent", NULL, NULL },
+	{ "CanvasItem", "light_mask", "get_light_mask", "set_light_mask", NULL, NULL },
+	{ "CanvasItem", "use_parent_material", "get_use_parent_material", "set_use_parent_material", NULL, NULL },
 	{ NULL, NULL, NULL, NULL, NULL, NULL }
 };
 
@@ -1507,6 +1992,82 @@ static const MetaEntry meta_props[] = {
 	{ "Node2D", "skew", 'f', 0 },
 	{ "Node2D", "global_skew", 'f', 0 },
 	{ "Spatial", "process_priority", 'i', 0 },
+	{ "Control", "clip_contents", 'b', 0 },
+	{ "Control", "grow_horizontal", 'i', 1 },
+	{ "Control", "grow_vertical", 'i', 1 },
+	{ "Control", "pivot_offset", 'v', 0 },
+	{ "Control", "layout_direction", 'i', 0 },
+	{ "Control", "auto_translate", 'b', 1 },
+	{ "Control", "localize_numeral_system", 'b', 1 },
+	{ "Control", "theme_type_variation", 'n', 0 },
+	{ "Control", "focus_next", 'n', 0 },
+	{ "Control", "focus_previous", 'n', 0 },
+	{ "Control", "custom_maximum_size", 'v', 0 },
+	{ "Control", "shortcut_context", 'n', 0 },
+	{ "Button", "icon_alignment", 'i', 0 },
+	{ "Button", "vertical_icon_alignment", 'i', 1 },
+	{ "Button", "expand_icon", 'b', 0 },
+	{ "Button", "text_overrun_behavior", 'i', 0 },
+	{ "Label", "text_overrun_behavior", 'i', 0 },
+	{ "Label", "justification_flags", 'i', 163 },
+	{ "LineEdit", "clear_button_enabled", 'b', 0 },
+	{ "LineEdit", "select_all_on_focus", 'b', 0 },
+	{ "LineEdit", "context_menu_enabled", 'b', 1 },
+	{ "LineEdit", "expand_to_text_length", 'b', 0 },
+	{ "LineEdit", "flat", 'b', 0 },
+	{ "TextEdit", "placeholder_text", 'n', 0 },
+	{ "TextEdit", "wrap_mode", 'i', 0 },
+	{ "TextEdit", "context_menu_enabled", 'b', 1 },
+	{ "TextEdit", "draw_tabs", 'b', 0 },
+	{ "TextEdit", "draw_spaces", 'b', 0 },
+	{ "TextEdit", "draw_control_chars", 'b', 0 },
+	{ "TextEdit", "scroll_smooth", 'b', 0 },
+	{ "TextEdit", "minimap_draw", 'b', 0 },
+	// CodeEdit (a TextEdit on Godot 2)
+	{ "TextEdit", "line_folding", 'b', 0 },
+	{ "TextEdit", "gutters_draw_fold_gutter", 'b', 0 },
+	{ "TextEdit", "gutters_draw_bookmarks", 'b', 0 },
+	{ "TextEdit", "gutters_draw_breakpoints_gutter", 'b', 0 },
+	{ "TextEdit", "gutters_draw_executing_lines", 'b', 0 },
+	{ "TextEdit", "code_completion_enabled", 'b', 0 },
+	{ "TextEdit", "indent_automatic", 'b', 0 },
+	{ "TextEdit", "indent_size", 'i', 4 },
+	{ "TextEdit", "indent_use_spaces", 'b', 0 },
+	{ "TextEdit", "auto_brace_completion_enabled", 'b', 0 },
+	{ "TextEdit", "auto_brace_completion_highlight_matching", 'b', 0 },
+	{ "RichTextLabel", "fit_content", 'b', 0 },
+	{ "RichTextLabel", "autowrap_mode", 'i', 3 },
+	{ "RichTextLabel", "context_menu_enabled", 'b', 0 },
+	{ "RichTextLabel", "threaded", 'b', 0 },
+	{ "Tree", "enable_recursive_folding", 'b', 1 },
+	{ "Tree", "scroll_horizontal_enabled", 'b', 1 },
+	{ "Tree", "scroll_vertical_enabled", 'b', 1 },
+	{ "Tree", "auto_tooltip", 'b', 1 },
+	{ "ItemList", "auto_height", 'b', 0 },
+	{ "ItemList", "text_overrun_behavior", 'i', 3 },
+	{ "TabContainer", "drag_to_rearrange_enabled", 'b', 0 },
+	{ "TabContainer", "clip_tabs", 'b', 1 },
+	{ "SplitContainer", "drag_area_margin_begin", 'i', 0 },
+	{ "SplitContainer", "drag_area_margin_end", 'i', 0 },
+	{ "ScrollContainer", "follow_focus", 'b', 0 },
+	{ "TextureFrame", "flip_h", 'b', 0 },
+	{ "TextureFrame", "flip_v", 'b', 0 },
+	{ "ProgressBar", "fill_mode", 'i', 0 },
+	{ "ProgressBar", "indeterminate", 'b', 0 },
+	{ "WindowDialog", "transient", 'b', 0 },
+	{ "WindowDialog", "borderless", 'b', 0 },
+	{ "WindowDialog", "unresizable", 'b', 0 },
+	{ "WindowDialog", "always_on_top", 'b', 0 },
+	{ "WindowDialog", "popup_window", 'b', 0 },
+	{ "WindowDialog", "wrap_controls", 'b', 0 },
+	{ "AcceptDialog", "ok_button_text", 'n', 0 },
+	{ "AcceptDialog", "dialog_close_on_escape", 'b', 1 },
+	{ "AcceptDialog", "dialog_autowrap", 'b', 0 },
+	{ "CanvasItem", "z_index", 'i', 0 },
+	{ "CanvasItem", "self_modulate", 'c', 0 },
+	{ "CanvasItem", "clip_children", 'i', 0 },
+	{ "CanvasItem", "texture_filter", 'i', 0 },
+	{ "CanvasItem", "texture_repeat", 'i', 0 },
 	{ NULL, NULL, 0, 0 }
 };
 
@@ -1645,7 +2206,110 @@ static const CallEntry calls[] = {
 	{ "Node2D", "to_local", NULL, n2d_to_local },
 	{ "Node2D", "get_angle_to", NULL, n2d_get_angle_to },
 	{ "Node2D", "look_at", NULL, n2d_look_at },
+	// Control
+	{ "Control", "get_anchor", NULL, ctl_get_anchor },
+	{ "Control", "set_anchor", NULL, ctl_set_anchor },
+	{ "Control", "get_offset", NULL, ctl_get_offset },
+	{ "Control", "set_offset", NULL, ctl_set_offset },
+	{ "Control", "set_anchor_and_offset", NULL, ctl_set_anchor_and_offset },
+	{ "Control", "set_anchors_preset", NULL, ctl_set_anchors_preset },
+	{ "Control", "set_offsets_preset", NULL, ctl_set_offsets_preset },
+	{ "Control", "set_anchors_and_offsets_preset", NULL, ctl_set_anchors_and_offsets_preset },
+	{ "Control", "set_position", "set_pos", NULL },
+	{ "Control", "get_position", "get_pos", NULL },
+	{ "Control", "set_global_position", "set_global_pos", NULL },
+	{ "Control", "get_global_position", "get_global_pos", NULL },
+	{ "Control", "get_screen_position", NULL, ctl_get_screen_position },
+	{ "Control", "update_minimum_size", NULL, ctl_update_minimum_size },
+	{ "Control", "add_theme_color_override", "add_color_override", NULL },
+	{ "Control", "add_theme_constant_override", "add_constant_override", NULL },
+	{ "Control", "add_theme_font_override", "add_font_override", NULL },
+	{ "Control", "add_theme_icon_override", "add_icon_override", NULL },
+	{ "Control", "add_theme_stylebox_override", "add_style_override", NULL },
+	{ "Control", "add_theme_font_size_override", NULL, noop },
+	{ "Control", "remove_theme_icon_override", NULL, ctl_remove_theme_icon_override },
+	{ "Control", "remove_theme_stylebox_override", NULL, ctl_remove_theme_stylebox_override },
+	{ "Control", "remove_theme_font_override", NULL, ctl_remove_theme_font_override },
+	{ "Control", "remove_theme_color_override", NULL, noop },
+	{ "Control", "remove_theme_constant_override", NULL, noop },
+	{ "Control", "remove_theme_font_size_override", NULL, noop },
+	{ "Control", "get_theme_color", "get_color", NULL },
+	{ "Control", "get_theme_constant", "get_constant", NULL },
+	{ "Control", "get_theme_font", "get_font", NULL },
+	{ "Control", "get_theme_icon", "get_icon", NULL },
+	{ "Control", "get_theme_stylebox", "get_stylebox", NULL },
+	{ "Control", "get_theme_font_size", NULL, ctl_get_theme_font_size },
+	{ "Control", "get_theme_default_font_size", NULL, ctl_get_theme_font_size },
+	{ "Control", "has_theme_color", "has_color", NULL },
+	{ "Control", "has_theme_constant", "has_constant", NULL },
+	{ "Control", "has_theme_font", "has_font", NULL },
+	{ "Control", "has_theme_icon", "has_icon", NULL },
+	{ "Control", "has_theme_stylebox", "has_stylebox", NULL },
+	{ "Control", "has_theme_font_size", NULL, return_false },
+	{ "Control", "has_theme_color_override", "has_color_override", NULL },
+	{ "Control", "has_theme_constant_override", "has_constant_override", NULL },
+	{ "Control", "has_theme_font_override", "has_font_override", NULL },
+	{ "Control", "has_theme_icon_override", "has_icon_override", NULL },
+	{ "Control", "has_theme_stylebox_override", "has_stylebox_override", NULL },
+	{ "Control", "has_theme_font_size_override", NULL, return_false },
+	{ "Control", "begin_bulk_theme_override", NULL, noop },
+	{ "Control", "end_bulk_theme_override", NULL, noop },
+	{ "Control", "reset_size", NULL, noop },
+	// CanvasItem
+	{ "CanvasItem", "queue_redraw", "update", NULL },
+	{ "CanvasItem", "is_visible_in_tree", "is_visible", NULL },
+	{ "CanvasItem", "get_global_mouse_position", "get_global_mouse_pos", NULL },
+	{ "CanvasItem", "get_local_mouse_position", "get_local_mouse_pos", NULL },
+	// GUI widgets
+	{ "RichTextLabel", "append_text", NULL, rtl_append_text },
+	{ "RichTextLabel", "get_parsed_text", NULL, rtl_get_parsed_text },
+	{ "PopupMenu", "add_item", NULL, popup_add_item },
+	{ "PopupMenu", "add_icon_item", NULL, popup_add_icon_item },
+	{ "PopupMenu", "add_check_item", NULL, popup_add_check_item },
+	{ "PopupMenu", "add_separator", NULL, popup_add_separator },
+	{ "PopupMenu", "set_item_as_checkable", NULL, popup_set_item_checkable },
+	{ "PopupMenu", "set_item_id", NULL, popup_set_item_id },
+	{ "PopupMenu", "get_item_id", NULL, popup_get_item_id },
+	{ "PopupMenu", "set_item_as_separator", NULL, popup_set_item_as_separator },
+	{ "OptionButton", "add_separator", NULL, popup_add_separator },
+	{ "OptionButton", "get_popup", NULL, option_get_popup },
+	{ "OptionButton", "set_item_id", NULL, popup_set_item_id },
+	{ "OptionButton", "get_item_id", NULL, popup_get_item_id },
+	{ "OptionButton", "get_selected_id", "get_selected_ID", NULL },
+	{ "TextEdit", "get_caret_line", NULL, textedit_get_caret_line },
+	{ "TextEdit", "get_caret_column", NULL, textedit_get_caret_column },
+	{ "TextEdit", "set_caret_line", NULL, textedit_set_caret_line },
+	{ "TextEdit", "set_caret_column", NULL, textedit_set_caret_column },
+	{ "TextEdit", "get_selected_text", NULL, textedit_get_selected_text },
+	{ "TextEdit", "has_selection", NULL, textedit_has_selection },
+	{ "TextEdit", "insert_text_at_caret", "insert_text_at_cursor", NULL },
+	{ "TextEdit", "get_word_under_caret", "get_word_under_cursor", NULL },
+	{ "LineEdit", "insert_text_at_caret", "append_at_cursor", NULL },
+	{ "ScrollContainer", "ensure_control_visible", NULL, noop },
+	// Object
+	{ "Object", "get_property_list", NULL, obj_get_property_list },
+	// Textures (Image values are wrapped as ImageRef in Lua)
+	{ "ImageTexture", "set_image", "set_data", NULL },
+	{ "ImageTexture", "update", "set_data", NULL },
+	{ "Texture", "get_image", "get_data", NULL },
 	{ NULL, NULL, NULL, NULL }
+};
+
+// (Godot 2 class, Godot 4 signal) -> Godot 2 signal
+static const char *signal_aliases[][3] = {
+	{ "PopupMenu", "id_pressed", "item_pressed" },
+	{ "LineEdit", "text_submitted", "text_entered" },
+	{ "Control", "focus_entered", "focus_enter" },
+	{ "Control", "focus_exited", "focus_exit" },
+	{ "Control", "mouse_entered", "mouse_enter" },
+	{ "Control", "mouse_exited", "mouse_exit" },
+	{ "Control", "gui_input", "input_event" },
+	{ "TextEdit", "caret_changed", "cursor_changed" },
+	{ "Popup", "popup_hide", "popup_hide" },
+	{ "WindowDialog", "close_requested", "popup_hide" },
+	{ "AcceptDialog", "canceled", "popup_hide" },
+	{ "Tree", "item_mouse_selected", "cell_selected" },
+	{ NULL, NULL, NULL }
 };
 
 /* Lookup (cached per class) */
@@ -1759,6 +2423,49 @@ bool call(Object *p_object, const String &p_method, const Array &p_args, Variant
 		return false;
 	r_ret = p_object->callv(p_method, p_args);
 	return true;
+}
+
+String signal_name(const Object *p_object, const String &p_signal) {
+
+	for (int i = 0; signal_aliases[i][0]; i++) {
+		if (p_signal == signal_aliases[i][1] && p_object->is_type(signal_aliases[i][0]))
+			return signal_aliases[i][2];
+	}
+	return p_signal;
+}
+
+static void manifest_add(Dictionary &r_out, const String &p_cls, const String &p_kind, const String &p_name) {
+	if (!r_out.has(p_cls))
+		r_out[p_cls] = Dictionary();
+	// Godot 2 dictionaries are copy-on-write: modify, then store back.
+	Dictionary c = to_dict(r_out[p_cls]);
+	Array a = c.has(p_kind) ? to_array(c[p_kind]) : Array();
+	a.push_back(p_name);
+	c[p_kind] = a;
+	r_out[p_cls] = c;
+}
+
+Dictionary manifest() {
+
+	Dictionary out;
+	for (int i = 0; props[i].cls; i++)
+		manifest_add(out, props[i].cls, "properties", props[i].name);
+	for (int i = 0; meta_props[i].cls; i++)
+		manifest_add(out, meta_props[i].cls, "properties", meta_props[i].name);
+	for (int i = 0; calls[i].cls; i++)
+		manifest_add(out, calls[i].cls, "methods", calls[i].name);
+	for (int i = 0; signal_aliases[i][0]; i++)
+		manifest_add(out, signal_aliases[i][0], "signals", signal_aliases[i][1]);
+	// Module classes standing in for Godot 4 classes implement Godot 4
+	// methods under their own names.
+	const char *backing[] = { "InputEventRef", "ImageRef", NULL };
+	for (int i = 0; backing[i]; i++) {
+		List<MethodInfo> methods;
+		ObjectTypeDB::get_method_list(backing[i], &methods, true);
+		for (List<MethodInfo>::Element *E = methods.front(); E; E = E->next())
+			manifest_add(out, backing[i], "methods", E->get().name);
+	}
+	return out;
 }
 
 void cleanup() {

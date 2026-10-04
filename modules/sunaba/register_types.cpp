@@ -5,6 +5,7 @@
 #include "register_types.h"
 
 #include "godot4_classes.h"
+#include "image_ref.h"
 #include "godot4_compat.h"
 #include "input_event_ref.h"
 #include "lua_runtime.h"
@@ -22,6 +23,7 @@ void register_sunaba_types() {
 	ObjectTypeDB::register_type<RefObject>();
 	ObjectTypeDB::register_type<InputEventRef>();
 	ObjectTypeDB::register_type<ZipReader>();
+	ObjectTypeDB::register_type<ImageRef>();
 
 	// Godot 4 classes missing from Godot 2.
 	ObjectTypeDB::register_virtual_type<PrimitiveMesh>();
@@ -36,6 +38,7 @@ void register_sunaba_types() {
 	ObjectTypeDB::register_type<KinematicCollision3D>();
 	ObjectTypeDB::register_type<RemoteTransform3D>();
 	ObjectTypeDB::register_type<SpringArm3D>();
+	ObjectTypeDB::register_type<Godot4Compat>();
 }
 
 void unregister_sunaba_types() {

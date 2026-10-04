@@ -4,6 +4,8 @@
 
 #include "godot4_classes.h"
 
+#include "godot4_compat.h"
+
 #include "scene/3d/physics_body.h"
 #include "scene/resources/world.h"
 #include "servers/physics_server.h"
@@ -350,4 +352,16 @@ SpringArm3D::SpringArm3D() {
 	margin = 0.01;
 	current_length = 0;
 	collision_mask = 1;
+}
+
+/* Godot4Compat */
+
+Dictionary Godot4Compat::get_manifest() const {
+
+	return sunaba::compat::manifest();
+}
+
+void Godot4Compat::_bind_methods() {
+
+	ObjectTypeDB::bind_method(_MD("get_manifest"), &Godot4Compat::get_manifest);
 }

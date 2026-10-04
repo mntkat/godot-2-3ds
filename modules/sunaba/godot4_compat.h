@@ -17,6 +17,7 @@
 #ifndef SUNABA_GODOT4_COMPAT_H
 #define SUNABA_GODOT4_COMPAT_H
 
+#include "dictionary.h"
 #include "object.h"
 
 namespace sunaba {
@@ -34,6 +35,14 @@ bool has_method(Object *p_object, const String &p_method);
 // Returns false (and leaves r_ret nil) if the method exists in neither the
 // compat tables nor the object.
 bool call(Object *p_object, const String &p_method, const Array &p_args, Variant &r_ret);
+
+// Godot 2 name of a Godot 4 signal (identity when unchanged).
+String signal_name(const Object *p_object, const String &p_signal);
+
+// What this layer emulates, by Godot 2 class: {"properties": [...],
+// "methods": [...], "signals": [...]} with Godot 4 names. Dumped for
+// libsunaba's bindings generator (Godot4Compat.get_manifest()).
+Dictionary manifest();
 
 void cleanup();
 

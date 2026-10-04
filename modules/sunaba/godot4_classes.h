@@ -152,4 +152,16 @@ public:
 	SpringArm3D();
 };
 
+// Exposes the compatibility layer's manifest (see godot4_compat.h) so tools
+// can dump it: Godot4Compat.new().get_manifest().
+class Godot4Compat : public Reference {
+	OBJ_TYPE(Godot4Compat, Reference);
+
+protected:
+	static void _bind_methods();
+
+public:
+	Dictionary get_manifest() const;
+};
+
 #endif // SUNABA_GODOT4_CLASSES_H

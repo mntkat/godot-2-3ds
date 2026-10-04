@@ -19,6 +19,8 @@ Godot 2.1 trees. It has been built against this fork (2.1.7) and stock 2.1.5.
 | `DisposableObject`, `RefObject` | Empty base classes, as in libsunaba. |
 | `ZipReader` (Reference) | Reads `.snb`/`.slib` zip archives from a path or a buffer without mounting them: `open`, `open_buffer`, `get_files`, `file_exists`, `read_file`, `read_text`. Built on the engine's minizip. |
 | `GodotFS` (Lua global) | Native file system for Lua: `exists`, `is_dir`, `is_file`, `size`, `mtime`, `list`, `mkdir` (recursive), `remove`, `rename`, `copy`, `read_all`, `write_all(path, data, append)`, `cwd`, `absolute`, and `open(path, mode)` returning a handle (`close`, `read`, `read_line`, `write`, `seek`, `tell`, `size`, `eof`, `flush`). Backs the Haxe `sys.*` classes, which need `luv` otherwise. Accepts `res://` and `user://` paths. |
+| `ImageRef` (Resource) | Godot 4's `Image` (the alias `Image` constructs it): `load_png_from_buffer`/`jpg`/`webp`, `load`, `save_png`, `save_png_to_buffer`, `get_pixel`/`set_pixel`, `fill`, `resize`, `crop`, `flip_x`, `convert`, `blit_rect`, `get_region`, `create`, `set_data`, ... with Godot 4 format and interpolation values. Wraps Godot 2's builtin `Image`; Lua sees Image values as `ImageRef` and passes them back unwrapped. BMP, TGA, SVG, KTX, DDS and EXR have no Godot 2 loader and return `ERR_FILE_UNRECOGNIZED`. |
+| `Godot4Compat` (Reference) | `get_manifest()` returns what the compatibility layer emulates (see below), for libsunaba's bindings generator. |
 | `InputEventRef` (Reference) | Wraps Godot 2's builtin `InputEvent` and presents it like Godot 4. `getClass`/`isClass` give `InputEventKey`, `InputEventMouseMotion`, ...; properties use Godot 4 names (`position`, `relative`, `keycode`, ...) and codes (keys, joypad buttons and axes); methods include `is_action_pressed`, `as_text`, `xformed_by`. |
 
 Scripts extending `Runtime` can implement `_require(path) -> String`,
@@ -85,6 +87,33 @@ and `NativeReference` translate them through `godot4_compat.cpp`:
   faces), `PhysicsMaterial`, `CylinderShape` (a convex hull),
   `KinematicCollision3D`, `RemoteTransform3D` and `SpringArm3D` (a ray, not
   a shape cast).
+- **Controls:** anchors are Godot 4 ratios and offsets are distances from
+  the anchor point (`anchor_*`, `offset_*`, `get_anchor`, `set_anchor`,
+  `set_offset`), mapped onto Godot 2's per-side anchor modes. Ratios 0, 0.5
+  and 1 map exactly; any other ratio becomes a `RATIO` anchor with no pixel
+  offset (the offset is only reported back). `set_anchors_preset`,
+  `set_offsets_preset` and `set_anchors_and_offsets_preset` follow Godot 4.
+  Also mapped: size flags (Godot 2 swaps `FILL` and `EXPAND`), mouse filter,
+  focus neighbours, `custom_minimum_size`, the `add_theme_*_override`,
+  `get_theme_*` and `has_theme_*` families (font sizes are not supported),
+  and `get_property_list()` entries gain `class_name`.
+- **GUI widgets:** Godot 4 names for `Button.icon`, `LineEdit.placeholder_text`,
+  `Range.value`, `Label` alignment, `RichTextLabel.text` (BBCode when
+  `bbcode_enabled`), `ScrollContainer` scroll modes, `TextEdit.editable` and
+  caret methods, `PopupMenu.add_item`/`add_separator`/`set_item_id`,
+  `OptionButton.get_popup`, `Window.title`, `AcceptDialog.dialog_text`, ...
+  `CodeEdit` is a `TextEdit`; its code-editing properties are kept in
+  metadata. `ImageTexture.set_image`/`update` and `Texture.get_image` take
+  and return `Image` objects.
+- **Signals:** Godot 4 names are mapped when a `Signal` is created
+  (`PopupMenu.id_pressed` → `item_pressed`, `LineEdit.text_submitted` →
+  `text_entered`, `mouse_entered` → `mouse_enter`, `gui_input` →
+  `input_event`, ...).
+- **Manifest:** `Godot4Compat.new().get_manifest()` lists the emulated
+  properties, methods and signals per Godot 2 class, plus the methods of
+  `ImageRef` and `InputEventRef`. libsunaba's `tools/godot2/bindgen.py`
+  reads a dump of it (`godot4_compat.json`), so update that dump when the
+  tables change.
 - **Not emulated:** per-surface material overrides (the instance's material
   override applies to every surface), continuous forces, angular axis locks,
   more than one linear axis lock, `Skeleton3D` modifiers and physical bones.
@@ -118,6 +147,13 @@ and `NativeReference` translate them through `godot4_compat.cpp`:
   did nothing, `ByteArray.new(table)` wrote past the end of its buffer,
   `toTable` returned a 0-based table, and `Vector2.gt/lt/gte/lte` were
   inverted.
+- Engine fixes made for the port: `ResourceLoader::load` reported
+  `ERR_CANT_OPEN` for cached resources (so every later `load()` of the same
+  path printed an error), and the 3DS build now passes
+  `-fno-delete-null-pointer-checks`. With `NO_SAFE_CAST`, `Object::cast_to`
+  relies on `if (!this) return NULL`, which GCC and Clang otherwise remove;
+  `CheckBox` crashed on that when drawn. Desktop builds with `NO_SAFE_CAST`
+  need the same flag.
 
 ## Lua errors and C++
 

@@ -261,7 +261,12 @@ SUNABA_LUA_FUNC(native_set_meta) {
 static int push_bound_list(lua_State *L, Object *p_self, const char *p_method) {
 
 	{
-		Array list = p_self ? p_self->call(p_method).operator Array() : Array();
+		// Through the compatibility layer, which adds Godot 4 details
+		// (e.g. class_name in property lists).
+		Variant ret;
+		if (p_self)
+			compat::call(p_self, p_method, Array(), ret);
+		Array list = ret.get_type() == Variant::ARRAY ? ret.operator Array() : Array();
 		push_box(L, list, SUNABA_MT_ARRAYLIST);
 	}
 	return 1;

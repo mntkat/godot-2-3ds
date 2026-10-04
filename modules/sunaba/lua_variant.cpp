@@ -158,8 +158,8 @@ SUNABA_LUA_FUNC(variant_as_object) {
 
 	VARIANT_SELF("asObject");
 	{
-		if (self_box->value.get_type() == Variant::INPUT_EVENT) {
-			push_typed(L, self_box->value); // wrapped as InputEventRef
+		if (self_box->value.get_type() == Variant::INPUT_EVENT || self_box->value.get_type() == Variant::IMAGE) {
+			push_typed(L, self_box->value); // wrapped as InputEventRef / ImageRef
 			return 1;
 		}
 		if (self_box->value.get_type() != Variant::OBJECT) {
@@ -180,8 +180,8 @@ SUNABA_LUA_FUNC(variant_as_reference) {
 
 	VARIANT_SELF("asReference");
 	{
-		if (self_box->value.get_type() == Variant::INPUT_EVENT) {
-			push_typed(L, self_box->value); // wrapped as InputEventRef
+		if (self_box->value.get_type() == Variant::INPUT_EVENT || self_box->value.get_type() == Variant::IMAGE) {
+			push_typed(L, self_box->value); // wrapped as InputEventRef / ImageRef
 			return 1;
 		}
 		if (self_box->value.get_type() != Variant::OBJECT) {

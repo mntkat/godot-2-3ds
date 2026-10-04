@@ -9,6 +9,8 @@
 
 #include "lua_bridge.h"
 
+#include "godot4_compat.h"
+
 #include "lua_runtime.h"
 #include "script_object.h"
 
@@ -370,6 +372,9 @@ SUNABA_LUA_FUNC(signal_new) {
 	}
 	{
 		String name = to_string(L, 2);
+		Object *obj = ob->get();
+		if (obj)
+			name = compat::signal_name(obj, name);
 		SignalBox *s = new_signal(L);
 		s->object = ob->id;
 		s->name = name;

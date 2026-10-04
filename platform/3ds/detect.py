@@ -83,6 +83,10 @@ def configure(env):
     arch = ['-march=armv6k', '-mtune=mpcore','-mfloat-abi=hard','-mtp=soft' ]
     env.Append(CCFLAGS=['-g','-Wall','-mword-relocations','-ffunction-sections', '-fno-rtti', '-fno-exceptions', '-std=gnu++11'] + arch)
     env.Append(CCFLAGS=['-D_3DS', '-DARM11','-DNEED_LONG_INT', '-DLIBC_FILEIO_ENABLED','-DNO_SAFE_CAST'])
+    # With NO_SAFE_CAST, Object::cast_to() starts with `if (!this) return NULL`
+    # and the engine calls it on null pointers (e.g. CheckBox::is_radio());
+    # keep GCC from optimizing that check away.
+    env.Append(CCFLAGS=['-fno-delete-null-pointer-checks'])
     env.Append(CPPPATH=[devkitpro_path+"/portlibs/armv6k/include", devkitpro_path +
                "/portlibs/3ds/include", ctrulib_path + "/include", devkitarm_path + "/arm-none-eabi/include"])
     env.Append(LIBPATH=[devkitpro_path+"/portlibs/armv6k/lib", devkitpro_path +
