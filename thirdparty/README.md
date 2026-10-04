@@ -167,6 +167,19 @@ changes to ensure they build for Javascript/HTML5. Those
 changes are marked with `// -- GODOT --` comments.
 
 
+## lua
+
+- Upstream: https://www.lua.org
+- Version: 5.4.8
+- License: MIT
+
+Files extracted from upstream source (the `src` folder), as vendored by
+libsunaba. Used by `modules/sunaba`.
+
+- All `.c` and `.h` files except `lua.c`, `luac.c`, `onelua.c`, `ltests.c`
+  and `ltests.h`
+
+
 ## minizip
 
 - Upstream: http://www.zlib.net
