@@ -24,6 +24,16 @@ class TestRuntime:
 	func take_function(fn):
 		return fn.call_func([20, 22])
 
+	func make_key_event():
+		var ev = InputEvent()
+		ev.type = InputEvent.KEY
+		ev.scancode = KEY_ESCAPE
+		ev.pressed = true
+		return ev
+
+	func take_event(ev):
+		return typeof(ev) == TYPE_INPUT_EVENT and ev.type == InputEvent.MOUSE_MOTION and ev.relative_pos == Vector2(5, -3)
+
 	func take_table(obj):
 		return obj.get_var("name") + ":" + str(obj.call_function("double", [21]))
 

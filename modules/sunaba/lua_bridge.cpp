@@ -4,6 +4,7 @@
 
 #include "lua_bridge.h"
 
+#include "input_event_ref.h"
 #include "lua_runtime.h"
 #include "script_object.h"
 
@@ -199,6 +200,11 @@ void push_typed(lua_State *L, const Variant &p_value) {
 			push_object(L, o);
 			return;
 		}
+		case Variant::INPUT_EVENT: {
+			Ref<InputEventRef> ev = InputEventRef::wrap(p_value);
+			push_object(L, ev.ptr());
+			return;
+		}
 		default: break;
 	}
 
@@ -253,6 +259,10 @@ void push_script_value(lua_State *L, const Variant &p_value) {
 			push_object(L, o);
 			return;
 		}
+		case Variant::INPUT_EVENT:
+			// Godot 4 events are objects; present Godot 2's the same way.
+			push_typed(L, p_value);
+			return;
 		default:
 			// libsunaba pushed everything else as a raw godot::Variant.
 			push_variant(L, p_value);
@@ -280,6 +290,10 @@ static Variant function_to_script_function(lua_State *L, int p_idx) {
 
 static Variant object_box_to_variant(const ObjectBox *p_box) {
 
+	// Godot 2 APIs take InputEvent values, not the wrapper.
+	const InputEventRef *ev = p_box->ref.is_valid() ? p_box->ref->cast_to<InputEventRef>() : NULL;
+	if (ev)
+		return ev->get_event();
 	if (p_box->ref.is_valid())
 		return Variant(p_box->ref);
 	return Variant(p_box->get());

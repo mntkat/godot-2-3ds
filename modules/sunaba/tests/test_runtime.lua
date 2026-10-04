@@ -143,6 +143,20 @@ local targs = ArrayList.new()
 targs:append(Variant.fromTable({ name = "obj", double = function(x) return x * 2 end }))
 check(__rootNode:call("take_table", targs):asString() == "obj:42", "ScriptObject get_var/call_function")
 
+-- InputEvent values are presented as Godot 4-style event objects
+local key = __rootNode:call("make_key_event", ArrayList.new()):asReference()
+check(key:isClass("InputEventKey") and key:isClass("InputEventWithModifiers") and not key:isClass("InputEventMouse"), "InputEventRef isClass")
+check(key:getClass() == "InputEventKey", "InputEventRef getClass")
+check(key:get("keycode"):asInt() == 4194305, "Godot 4 keycode (KEY_ESCAPE)")
+check(key:get("pressed"):asBool() and key:call("is_pressed", ArrayList.new()):asBool(), "InputEventRef pressed")
+local motion = NativeReference.new("InputEventRef")
+local margs = ArrayList.new(); margs:append("InputEventMouseMotion")
+motion:call("init_type", margs)
+motion:set("relative", Vector2.new(5, -3))
+check(motion:get("relative"):asVector2().y == -3, "InputEventRef set/get relative")
+local eargs = ArrayList.new(); eargs:append(motion)
+check(__rootNode:call("take_event", eargs):asBool(), "InputEventRef unwraps to a Godot 2 InputEvent")
+
 -- require through Runtime._require
 check(require("mymod").answer == 42, "require via _require")
 
@@ -155,6 +169,10 @@ check(raw:getType() == 29, "Variant.fromByteArray")
 local back = raw:asByteArray()
 check(back:size() == 4 and back:get(3):getInt() == 7, "ByteArray round trip")
 check(Byte.new(1.5):getFloat() == 1.5, "Byte float cell")
+
+-- bit32 is preloaded (Haxe's Lua output requires it)
+local bit32 = require("bit32")
+check(bit32.band(6, 3) == 2 and bit32.bor(4, 1) == 5 and bit32.lshift(1, 4) == 16, "bit32")
 
 -- print formatting
 print("ALL OK")

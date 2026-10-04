@@ -17,6 +17,7 @@ Godot 2.1 trees. It has been built against this fork (2.1.7) and stock 2.1.5.
 | `ScriptObject` (Reference) | A Lua table seen from GDScript: `get_var`, `set_var`, `has_var`, `has_function`, `call_function(name, args)`. |
 | `ScriptFunction` (Reference) | A Lua function: `call_func(args)`; `invoke(...)` is the varargs entry point used by signal connections. |
 | `DisposableObject`, `RefObject` | Empty base classes, as in libsunaba. |
+| `InputEventRef` (Reference) | Wraps Godot 2's builtin `InputEvent` and presents it like Godot 4. `getClass`/`isClass` give `InputEventKey`, `InputEventMouseMotion`, ...; properties use Godot 4 names (`position`, `relative`, `keycode`, ...) and codes (keys, joypad buttons and axes); methods include `is_action_pressed`, `as_text`, `xformed_by`. |
 
 Scripts extending `Runtime` can implement `_require(path) -> String`,
 `_print(msgarr)`, `_errord/_warnd/_infod(msg, title)` and `_exit(code)`.
@@ -36,6 +37,14 @@ camelCase names map to snake_case, and a table covers Godot 4 → 2 renames
 (`lerp` → `linear_interpolate`, `position` → `pos`, ...). Methods Godot 2
 lacks, or whose semantics changed (`reflect`, `bounce`, `slide`), are
 implemented in Lua in `lua_prelude.cpp`.
+
+`InputEvent` values crossing into Lua are wrapped in an `InputEventRef`
+automatically, and unwrapped when passed back to the engine, so libsunaba's
+Haxe input classes work unchanged.
+
+`bit32` is preloaded (`require("bit32")`), because Haxe's Lua output needs
+it and Lua 5.4 no longer ships it. It uses the pure-Lua implementation from
+sunaba desktop (MIT, Andras Horvath).
 
 `Variant.getType()` returns Godot 4 type numbers, matching the Haxe
 `VariantType` enum. `SUNABA_GODOT_MAJOR` is set to `2`.

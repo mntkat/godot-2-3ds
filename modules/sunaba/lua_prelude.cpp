@@ -9,6 +9,8 @@
 
 #include "lua_bridge.h"
 
+#include "lua_bit32.h"
+
 namespace sunaba {
 
 static const char *PRELUDE =
@@ -131,7 +133,28 @@ static const char *PRELUDE =
 		"  return approx(a.r, b.r) and approx(a.g, b.g) and approx(a.b, b.b) and approx(a.a, b.a)\n"
 		"end\n";
 
+// Registers bit32 as package.preload.bit32 (Haxe's Lua output requires it).
+static void preload_bit32(lua_State *L) {
+
+	lua_getglobal(L, "package");
+	if (!lua_istable(L, -1)) {
+		lua_pop(L, 1);
+		return;
+	}
+	lua_getfield(L, -1, "preload");
+	if (luaL_loadbuffer(L, BIT32_SOURCE, strlen(BIT32_SOURCE), "=bit32") != LUA_OK) {
+		lua_remove(L, -2);
+		lua_remove(L, -2);
+		report_error(L, "bit32");
+		return;
+	}
+	lua_setfield(L, -2, "bit32");
+	lua_pop(L, 2);
+}
+
 void run_prelude(lua_State *L) {
+
+	preload_bit32(L);
 
 	if (luaL_loadbuffer(L, PRELUDE, strlen(PRELUDE), "=sunaba_prelude") != LUA_OK || pcall_traceback(L, 0, 0) != LUA_OK)
 		report_error(L, "Prelude");

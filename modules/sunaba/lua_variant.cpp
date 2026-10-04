@@ -7,6 +7,7 @@
 
 #include "lua_bridge.h"
 
+#include "input_event_ref.h"
 #include "lua_runtime.h"
 #include "script_object.h"
 
@@ -157,6 +158,10 @@ SUNABA_LUA_FUNC(variant_as_object) {
 
 	VARIANT_SELF("asObject");
 	{
+		if (self_box->value.get_type() == Variant::INPUT_EVENT) {
+			push_typed(L, self_box->value); // wrapped as InputEventRef
+			return 1;
+		}
 		if (self_box->value.get_type() != Variant::OBJECT) {
 			lua_pushnil(L);
 			return 1;
@@ -175,6 +180,10 @@ SUNABA_LUA_FUNC(variant_as_reference) {
 
 	VARIANT_SELF("asReference");
 	{
+		if (self_box->value.get_type() == Variant::INPUT_EVENT) {
+			push_typed(L, self_box->value); // wrapped as InputEventRef
+			return 1;
+		}
 		if (self_box->value.get_type() != Variant::OBJECT) {
 			lua_pushnil(L);
 			return 1;

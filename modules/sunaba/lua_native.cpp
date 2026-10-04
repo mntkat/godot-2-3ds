@@ -13,6 +13,7 @@
 #include "lua_bridge.h"
 
 #include "globals.h"
+#include "input_event_ref.h"
 #include "io/resource_loader.h"
 #include "lua_runtime.h"
 #include "object_type_db.h"
@@ -202,7 +203,11 @@ SUNABA_LUA_FUNC(native_get_class) {
 
 	OBJECT_SELF("getClass");
 	{
-		CharString cs = (self ? self->get_type() : String()).utf8();
+		String cls = self ? self->get_type() : String();
+		InputEventRef *ev = self ? self->cast_to<InputEventRef>() : NULL;
+		if (ev)
+			cls = ev->get_godot4_class();
+		CharString cs = cls.utf8();
 		lua_pushlstring(L, cs.get_data(), cs.length());
 	}
 	return 1;
@@ -213,7 +218,9 @@ SUNABA_LUA_FUNC(native_is_class) {
 	OBJECT_SELF("isClass");
 	bool is;
 	{
-		is = self && self->is_type(to_string(L, 2));
+		String cls = to_string(L, 2);
+		InputEventRef *ev = self ? self->cast_to<InputEventRef>() : NULL;
+		is = ev ? ev->is_godot4_class(cls) : (self && self->is_type(cls));
 	}
 	lua_pushboolean(L, is);
 	return 1;
