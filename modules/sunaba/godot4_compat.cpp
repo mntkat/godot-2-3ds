@@ -16,6 +16,7 @@
 #include "scene/main/viewport.h"
 #include "scene/gui/popup_menu.h"
 #include "scene/gui/rich_text_label.h"
+#include "scene/gui/text_edit.h"
 #include "scene/3d/body_shape.h"
 #include "scene/3d/physics_body.h"
 #include "scene/resources/capsule_shape.h"
@@ -1767,6 +1768,33 @@ G4_SET(textedit_set_syntax_highlighter) {
 	h->apply_to(o);
 }
 
+// Godot 4's TextEdit.text setter does not emit text_changed. Godot 2's
+// set_text means not to either, but clear() resets its guard, so the signal
+// is queued anyway (code marking a file modified on text_changed then fires
+// for loading it). TextEdit::text_changed_dirty is private; this reaches it
+// through explicit template instantiation, which ignores access checks.
+template <typename Tag, typename Tag::type M>
+struct PrivateMember {
+	friend typename Tag::type get(Tag) { return M; }
+};
+struct TextChangedDirty {
+	typedef bool TextEdit::*type;
+	friend type get(TextChangedDirty);
+};
+template struct PrivateMember<TextChangedDirty, &TextEdit::text_changed_dirty>;
+
+G4_GET(textedit_get_text) { return call0(o, "get_text"); }
+G4_SET(textedit_set_text) {
+	TextEdit *te = o->cast_to<TextEdit>();
+	if (!te)
+		return;
+	bool &dirty = te->*get(TextChangedDirty());
+	bool was_dirty = dirty;
+	dirty = true; // already "dirty": set_text queues no emission
+	te->set_text(v);
+	dirty = was_dirty;
+}
+
 G4_CALL(textedit_get_caret_line) { return call0(o, "cursor_get_line"); }
 G4_CALL(textedit_get_caret_column) { return call0(o, "cursor_get_column"); }
 G4_CALL(textedit_set_caret_line) { return call2(o, "cursor_set_line", arg(args, 0), arg(args, 1, true)); }
@@ -1953,6 +1981,7 @@ static const PropEntry props[] = {
 	{ "ScrollContainer", "scroll_vertical", "get_v_scroll", "set_v_scroll", NULL, NULL },
 	{ "ScrollContainer", "scroll_deadzone", "get_deadzone", "set_deadzone", NULL, NULL },
 	{ "TextEdit", "editable", NULL, NULL, textedit_get_editable, textedit_set_editable },
+	{ "TextEdit", "text", NULL, NULL, textedit_get_text, textedit_set_text },
 	{ "TextEdit", "syntax_highlighter", NULL, NULL, textedit_get_syntax_highlighter, textedit_set_syntax_highlighter },
 	{ "TextEdit", "highlight_all_occurrences", "is_highlight_all_occurrences_enabled", "set_highlight_all_occurrences", NULL, NULL },
 	{ "TextEdit", "caret_blink", "cursor_get_blink_enabled", "cursor_set_blink_enabled", NULL, NULL },
