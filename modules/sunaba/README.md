@@ -49,6 +49,44 @@ sunaba desktop (MIT, Andras Horvath).
 `Variant.getType()` returns Godot 4 type numbers, matching the Haxe
 `VariantType` enum. `SUNABA_GODOT_MAJOR` is set to `2`.
 
+## Godot 4 compatibility layer
+
+libsunaba's Haxe components address engine objects with Godot 4 names
+(`Node3D`, `Camera3D`, `position`, `move_and_slide`, ...). `NativeObject`
+and `NativeReference` translate them through `godot4_compat.cpp`:
+
+- **Classes:** about 90 aliases (`Node3D` → `Spatial`, `CharacterBody3D` →
+  `KinematicBody`, `StandardMaterial3D` → `FixedMaterial`, ...). `getClass`
+  and `isClass` answer with Godot 4 names.
+- **Properties and methods:** tables map Godot 4 names to Godot 2 accessors
+  or to emulation code, then fall back to the object's own property and to
+  `get_x`/`is_x`/`set_x`. Properties Godot 2 cannot represent (e.g.
+  `Light3D.light_temperature`) are stored in object metadata, so reads
+  return the last written value.
+- **Conventions:** Godot 4 Euler order (YXZ) and basis = rotation · scale
+  for `Node3D`; `Node2D.rotation` and `Camera2D.zoom` have Godot 4's sign
+  and scale; capsule heights include the caps, and a `CollisionShape` holding
+  a capsule is turned so it stands along Y.
+- **`CharacterBody3D`:** `move_and_slide`, `move_and_collide`, `test_move`,
+  floor/wall/ceiling state, floor snap and `KinematicCollision3D`, built on
+  `KinematicBody.move`. Constants such as `up_direction` and
+  `floor_max_angle` live in the emulation state.
+- **`RigidBody3D`:** `freeze`, `freeze_mode` and `lock_rotation` map onto
+  Godot 2's body modes; forces become one-step impulses.
+- **Shapes:** `CollisionShape3D` children register with their body when
+  added or when `shape` is set (Godot 2 does this only in the editor).
+  `shape_owner_*` is emulated on the body's flat shape list; use one
+  mechanism or the other on a given body.
+- **Classes added by the module:** `BoxMesh`, `SphereMesh`, `CapsuleMesh`,
+  `CylinderMesh`, `PlaneMesh`, `QuadMesh` (Godot 4 property names and
+  defaults, regenerated when a property changes, Godot's clockwise front
+  faces), `PhysicsMaterial`, `CylinderShape` (a convex hull),
+  `KinematicCollision3D`, `RemoteTransform3D` and `SpringArm3D` (a ray, not
+  a shape cast).
+- **Not emulated:** per-surface material overrides (the instance's material
+  override applies to every surface), continuous forces, angular axis locks,
+  more than one linear axis lock, `Skeleton3D` modifiers and physical bones.
+
 ## Differences from libsunaba on Godot 4
 
 - **No sol2.** sol2 needs C++17, and Godot 2's headers do not compile as
@@ -88,10 +126,11 @@ that scope has unwound. Calls back into Lua always use `lua_pcall`.
 
 ## Tests
 
-`tests/` contains a headless smoke test that covers every bound type. Build a
+`tests/` contains headless tests: `test_runtime.gd` covers every bound type and
+`test_compat.gd` the Godot 4 compatibility layer, including a stepped physics
+scene. Build a
 `server` (or desktop) binary with the module, then run it from the `tests`
 directory:
 
-    godot_server -s test_runtime.gd
-
-It prints `SUNABA TESTS PASSED` on success.
+    godot_server -s test_runtime.gd    # prints SUNABA TESTS PASSED
+    godot_server -s test_compat.gd     # prints COMPAT TESTS PASSED

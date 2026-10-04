@@ -13,6 +13,7 @@
 #include "lua_bridge.h"
 
 #include "globals.h"
+#include "godot4_compat.h"
 #include "input_event_ref.h"
 #include "io/resource_loader.h"
 #include "lua_runtime.h"
@@ -61,7 +62,7 @@ static Object *create_object(const String &p_name, const Array &p_args, int p_sc
 	Object *obj = NULL;
 	switch (p_script_type) {
 		case SCRIPT_NONE:
-			obj = ObjectTypeDB::instance(p_name);
+			obj = ObjectTypeDB::instance(compat::to_godot2_class(p_name));
 			break;
 		case SCRIPT_GDSCRIPT: {
 			RES res = ResourceLoader::load(p_name);
@@ -90,7 +91,7 @@ SUNABA_LUA_FUNC(native_new) {
 	const char *mt = lua_tostring(L, lua_upvalueindex(1));
 	{
 		String name = to_string(L, 1);
-		if (!sandbox_allows(L, name)) {
+		if (!sandbox_allows(L, name) && !sandbox_allows(L, compat::to_godot2_class(name))) {
 			lua_pushnil(L);
 			return 1;
 		}
@@ -172,11 +173,10 @@ SUNABA_LUA_FUNC(native_call) {
 			err.format("call: args must be an ArrayList");
 			return 0;
 		}
-		if (!self || !self->has_method(method)) {
-			push_variant(L, Variant());
-			return 1;
-		}
-		push_variant(L, self->callv(method, args));
+		Variant ret;
+		if (self)
+			compat::call(self, method, args, ret);
+		push_variant(L, ret);
 	}
 	return 1;
 }
@@ -185,7 +185,7 @@ SUNABA_LUA_FUNC(native_get) {
 
 	OBJECT_SELF("get");
 	{
-		push_variant(L, self ? self->get(to_string(L, 2)) : Variant());
+		push_variant(L, self ? compat::get(self, to_string(L, 2)) : Variant());
 	}
 	return 1;
 }
@@ -194,7 +194,7 @@ SUNABA_LUA_FUNC(native_set) {
 
 	OBJECT_SELF("set");
 	if (self) {
-		self->set(to_string(L, 2), to_variant(L, 3));
+		compat::set(self, to_string(L, 2), to_variant(L, 3));
 	}
 	return 0;
 }
@@ -203,7 +203,7 @@ SUNABA_LUA_FUNC(native_get_class) {
 
 	OBJECT_SELF("getClass");
 	{
-		String cls = self ? self->get_type() : String();
+		String cls = self ? compat::godot4_class(self) : String();
 		InputEventRef *ev = self ? self->cast_to<InputEventRef>() : NULL;
 		if (ev)
 			cls = ev->get_godot4_class();
@@ -220,7 +220,7 @@ SUNABA_LUA_FUNC(native_is_class) {
 	{
 		String cls = to_string(L, 2);
 		InputEventRef *ev = self ? self->cast_to<InputEventRef>() : NULL;
-		is = ev ? ev->is_godot4_class(cls) : (self && self->is_type(cls));
+		is = ev ? ev->is_godot4_class(cls) : (self && compat::is_class(self, cls));
 	}
 	lua_pushboolean(L, is);
 	return 1;
@@ -311,7 +311,7 @@ SUNABA_LUA_FUNC(native_has_method) {
 	OBJECT_SELF("hasMethod");
 	bool has;
 	{
-		has = self && self->has_method(to_string(L, 2));
+		has = self && compat::has_method(self, to_string(L, 2));
 	}
 	lua_pushboolean(L, has);
 	return 1;
