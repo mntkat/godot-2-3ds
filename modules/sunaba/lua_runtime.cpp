@@ -210,6 +210,7 @@ void Runtime::init_state(bool p_sandboxed, const Array &p_classnames) {
 	open_containers(L);
 	open_callable(L);
 	open_io(L);
+	open_fs(L);
 	open_variant(L, p_sandboxed, p_classnames);
 	open_native(L, p_sandboxed, p_classnames);
 

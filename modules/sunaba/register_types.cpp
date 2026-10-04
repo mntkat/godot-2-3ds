@@ -11,6 +11,7 @@
 #include "object_type_db.h"
 #include "primitive_meshes.h"
 #include "script_object.h"
+#include "zip_reader.h"
 
 void register_sunaba_types() {
 
@@ -20,6 +21,7 @@ void register_sunaba_types() {
 	ObjectTypeDB::register_type<DisposableObject>();
 	ObjectTypeDB::register_type<RefObject>();
 	ObjectTypeDB::register_type<InputEventRef>();
+	ObjectTypeDB::register_type<ZipReader>();
 
 	// Godot 4 classes missing from Godot 2.
 	ObjectTypeDB::register_virtual_type<PrimitiveMesh>();

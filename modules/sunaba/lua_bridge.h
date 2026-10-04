@@ -221,6 +221,7 @@ void open_containers(lua_State *L);
 void open_native(lua_State *L, bool p_sandboxed, const Array &p_classnames);
 void open_callable(lua_State *L);
 void open_io(lua_State *L);
+void open_fs(lua_State *L);
 void run_prelude(lua_State *L);
 
 } // namespace sunaba

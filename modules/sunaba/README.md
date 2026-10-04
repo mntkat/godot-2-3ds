@@ -17,6 +17,8 @@ Godot 2.1 trees. It has been built against this fork (2.1.7) and stock 2.1.5.
 | `ScriptObject` (Reference) | A Lua table seen from GDScript: `get_var`, `set_var`, `has_var`, `has_function`, `call_function(name, args)`. |
 | `ScriptFunction` (Reference) | A Lua function: `call_func(args)`; `invoke(...)` is the varargs entry point used by signal connections. |
 | `DisposableObject`, `RefObject` | Empty base classes, as in libsunaba. |
+| `ZipReader` (Reference) | Reads `.snb`/`.slib` zip archives from a path or a buffer without mounting them: `open`, `open_buffer`, `get_files`, `file_exists`, `read_file`, `read_text`. Built on the engine's minizip. |
+| `GodotFS` (Lua global) | Native file system for Lua: `exists`, `is_dir`, `is_file`, `size`, `mtime`, `list`, `mkdir` (recursive), `remove`, `rename`, `copy`, `read_all`, `write_all(path, data, append)`, `cwd`, `absolute`, and `open(path, mode)` returning a handle (`close`, `read`, `read_line`, `write`, `seek`, `tell`, `size`, `eof`, `flush`). Backs the Haxe `sys.*` classes, which need `luv` otherwise. Accepts `res://` and `user://` paths. |
 | `InputEventRef` (Reference) | Wraps Godot 2's builtin `InputEvent` and presents it like Godot 4. `getClass`/`isClass` give `InputEventKey`, `InputEventMouseMotion`, ...; properties use Godot 4 names (`position`, `relative`, `keycode`, ...) and codes (keys, joypad buttons and axes); methods include `is_action_pressed`, `as_text`, `xformed_by`. |
 
 Scripts extending `Runtime` can implement `_require(path) -> String`,
@@ -134,3 +136,5 @@ directory:
 
     godot_server -s test_runtime.gd    # prints SUNABA TESTS PASSED
     godot_server -s test_compat.gd     # prints COMPAT TESTS PASSED
+    godot_server -s test_zip.gd        # prints ZIP TESTS PASSED
+    godot_server -s test_fs.gd         # prints FS TESTS PASSED
