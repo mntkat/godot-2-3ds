@@ -242,8 +242,8 @@ SUNABA_LUA_FUNC(fs_cwd) {
 	return 1;
 }
 
-// Real filesystem path for res:// and user:// paths; other paths are
-// returned unchanged.
+// Real filesystem path for res:// and user:// paths; relative paths are
+// joined to the current directory, and absolute ones returned unchanged.
 SUNABA_LUA_FUNC(fs_absolute) {
 
 	{
@@ -252,6 +252,11 @@ SUNABA_LUA_FUNC(fs_absolute) {
 			p = Globals::get_singleton()->globalize_path(p);
 		else if (p.begins_with("user://"))
 			p = OS::get_singleton()->get_data_dir().plus_file(p.substr(7, p.length()));
+		else if (p.is_rel_path()) {
+			DirAccess *d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+			p = d->get_current_dir().plus_file(p).simplify_path();
+			memdelete(d);
+		}
 		CharString cs = p.utf8();
 		lua_pushlstring(L, cs.get_data(), cs.length());
 	}

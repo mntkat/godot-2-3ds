@@ -62,5 +62,6 @@ check(GodotFS.rename(dir .. "/c.txt", dir .. "/d.txt") and GodotFS.exists(dir ..
 check(GodotFS.copy(dir .. "/d.txt", dir .. "/e.txt") and GodotFS.read_all(dir .. "/e.txt") == "abcdefghi", "copy")
 check(GodotFS.remove(dir .. "/e.txt") and not GodotFS.exists(dir .. "/e.txt"), "remove")
 check(GodotFS.absolute("user://x"):sub(1, 6) ~= "user:/", "absolute resolves user://")
+check(GodotFS.absolute("a/b") == GodotFS.cwd():gsub("/$", "") .. "/a/b", "absolute resolves relative paths")
 check(#GodotFS.cwd() > 0, "cwd")
 print("FS OK")

@@ -6,6 +6,7 @@
 
 #include "code_highlighter_ref.h"
 #include "godot4_classes.h"
+#include "input_event_ref.h"
 #include "hash_map.h"
 #include "math_funcs.h"
 #include "object_type_db.h"
@@ -1604,6 +1605,33 @@ G4_CALL(node_get_window) {
 }
 G4_CALL(viewport_get_size_with_decorations) { return call0(o, "get_visible_rect").operator Rect2().size; }
 
+/* Input (Godot 4 key, joypad and mouse codes) */
+
+G4_CALL(input_is_key_pressed) {
+	return call1(o, "is_key_pressed", (int)InputEventRef::key_from_godot4(arg(args, 0)));
+}
+G4_CALL(input_is_joy_button_pressed) {
+	return call2(o, "is_joy_button_pressed", arg(args, 0), InputEventRef::joy_button_from_godot4(arg(args, 1)));
+}
+G4_CALL(input_get_joy_axis) {
+	return call2(o, "get_joy_axis", arg(args, 0), InputEventRef::joy_axis_from_godot4(arg(args, 1)));
+}
+// Godot 2 actions are digital.
+static float action_strength(Object *o, const Variant &p_action) {
+	return (bool)call1(o, "is_action_pressed", p_action) ? 1.0 : 0.0;
+}
+G4_CALL(input_get_action_strength) { return action_strength(o, arg(args, 0)); }
+G4_CALL(input_get_vector) {
+	// get_vector(negative_x, positive_x, negative_y, positive_y)
+	Vector2 v;
+	v.x = action_strength(o, arg(args, 1)) - action_strength(o, arg(args, 0));
+	v.y = action_strength(o, arg(args, 3)) - action_strength(o, arg(args, 2));
+	return v.length() > 1 ? v.normalized() : v;
+}
+G4_CALL(input_get_axis) {
+	return action_strength(o, arg(args, 1)) - action_strength(o, arg(args, 0));
+}
+
 /* GUI widgets */
 
 // Godot 4's text is the BBCode source when bbcode_enabled is set.
@@ -2382,6 +2410,17 @@ static const CallEntry calls[] = {
 	{ "TreeItem", "get_index", NULL, treeitem_get_index },
 	{ "TreeItem", "get_next_in_tree", "get_next_visible", NULL },
 	{ "TreeItem", "get_prev_in_tree", "get_prev_visible", NULL },
+	// Input
+	{ "Input", "is_key_pressed", NULL, input_is_key_pressed },
+	{ "Input", "is_key_label_pressed", NULL, input_is_key_pressed },
+	{ "Input", "is_physical_key_pressed", NULL, input_is_key_pressed },
+	{ "Input", "is_joy_button_pressed", NULL, input_is_joy_button_pressed },
+	{ "Input", "get_joy_axis", NULL, input_get_joy_axis },
+	{ "Input", "get_action_strength", NULL, input_get_action_strength },
+	{ "Input", "get_action_raw_strength", NULL, input_get_action_strength },
+	{ "Input", "get_vector", NULL, input_get_vector },
+	{ "Input", "get_axis", NULL, input_get_axis },
+	{ "Input", "is_anything_pressed", NULL, return_false },
 	// Object, Node, Viewport (as Godot 4's root Window)
 	{ "Object", "get_property_list", NULL, obj_get_property_list },
 	{ "Node", "get_window", NULL, node_get_window },
