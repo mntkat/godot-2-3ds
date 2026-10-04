@@ -20,6 +20,7 @@ Godot 2.1 trees. It has been built against this fork (2.1.7) and stock 2.1.5.
 | `ZipReader` (Reference) | Reads `.snb`/`.slib` zip archives from a path or a buffer without mounting them: `open`, `open_buffer`, `get_files`, `file_exists`, `read_file`, `read_text`. Built on the engine's minizip. |
 | `GodotFS` (Lua global) | Native file system for Lua: `exists`, `is_dir`, `is_file`, `size`, `mtime`, `list`, `mkdir` (recursive), `remove`, `rename`, `copy`, `read_all`, `write_all(path, data, append)`, `cwd`, `absolute`, and `open(path, mode)` returning a handle (`close`, `read`, `read_line`, `write`, `seek`, `tell`, `size`, `eof`, `flush`). Backs the Haxe `sys.*` classes, which need `luv` otherwise. Accepts `res://` and `user://` paths. |
 | `ImageRef` (Resource) | Godot 4's `Image` (the alias `Image` constructs it): `load_png_from_buffer`/`jpg`/`webp`, `load`, `save_png`, `save_png_to_buffer`, `get_pixel`/`set_pixel`, `fill`, `resize`, `crop`, `flip_x`, `convert`, `blit_rect`, `get_region`, `create`, `set_data`, ... with Godot 4 format and interpolation values. Wraps Godot 2's builtin `Image`; Lua sees Image values as `ImageRef` and passes them back unwrapped. BMP, TGA, SVG, KTX, DDS and EXR have no Godot 2 loader and return `ERR_FILE_UNRECOGNIZED`. |
+| `CodeHighlighterRef` (Resource) | Godot 4's `CodeHighlighter` (aliases `CodeHighlighter`, `SyntaxHighlighter`): keyword and member keyword colors, color regions, number/symbol/function/member colors. Assigning it to a `TextEdit`'s `syntax_highlighter` applies it with Godot 2's `add_keyword_color`/`add_color_region` and theme color overrides; reassigning an unchanged highlighter is skipped. |
 | `Godot4Compat` (Reference) | `get_manifest()` returns what the compatibility layer emulates (see below), for libsunaba's bindings generator. |
 | `InputEventRef` (Reference) | Wraps Godot 2's builtin `InputEvent` and presents it like Godot 4. `getClass`/`isClass` give `InputEventKey`, `InputEventMouseMotion`, ...; properties use Godot 4 names (`position`, `relative`, `keycode`, ...) and codes (keys, joypad buttons and axes); methods include `is_action_pressed`, `as_text`, `xformed_by`. |
 
@@ -105,6 +106,10 @@ and `NativeReference` translate them through `godot4_compat.cpp`:
   `CodeEdit` is a `TextEdit`; its code-editing properties are kept in
   metadata. `ImageTexture.set_image`/`update` and `Texture.get_image` take
   and return `Image` objects.
+- **Trees and windows:** `TreeItem.get_first_child`/`get_children`/
+  `get_child`/`get_child_count`/`get_index`; `Node.get_window()` returns the
+  root `Viewport`, which carries Godot 4 `Window` properties such as
+  `content_scale_factor` (kept in metadata).
 - **Signals:** Godot 4 names are mapped when a `Signal` is created
   (`PopupMenu.id_pressed` → `item_pressed`, `LineEdit.text_submitted` →
   `text_entered`, `mouse_entered` → `mouse_enter`, `gui_input` →

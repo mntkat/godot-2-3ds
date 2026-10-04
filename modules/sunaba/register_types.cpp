@@ -5,6 +5,7 @@
 #include "register_types.h"
 
 #include "godot4_classes.h"
+#include "code_highlighter_ref.h"
 #include "image_ref.h"
 #include "godot4_compat.h"
 #include "input_event_ref.h"
@@ -24,6 +25,7 @@ void register_sunaba_types() {
 	ObjectTypeDB::register_type<InputEventRef>();
 	ObjectTypeDB::register_type<ZipReader>();
 	ObjectTypeDB::register_type<ImageRef>();
+	ObjectTypeDB::register_type<CodeHighlighterRef>();
 
 	// Godot 4 classes missing from Godot 2.
 	ObjectTypeDB::register_virtual_type<PrimitiveMesh>();

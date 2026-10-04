@@ -4,12 +4,15 @@
 
 #include "godot4_compat.h"
 
+#include "code_highlighter_ref.h"
 #include "godot4_classes.h"
 #include "hash_map.h"
 #include "math_funcs.h"
 #include "object_type_db.h"
 #include "scene/2d/node_2d.h"
 #include "scene/gui/control.h"
+#include "scene/main/scene_main_loop.h"
+#include "scene/main/viewport.h"
 #include "scene/gui/popup_menu.h"
 #include "scene/gui/rich_text_label.h"
 #include "scene/3d/body_shape.h"
@@ -108,6 +111,8 @@ static const char *class_aliases[][2] = {
 	{ "FontFile", "DynamicFontData" },
 	{ "ViewportTexture", "RenderTargetTexture" },
 	{ "Image", "ImageRef" },
+	{ "CodeHighlighter", "CodeHighlighterRef" },
+	{ "SyntaxHighlighter", "CodeHighlighterRef" },
 	// Last, so a plain TextEdit still reports itself as TextEdit.
 	{ "CodeEdit", "TextEdit" },
 	{ NULL, NULL }
@@ -1590,6 +1595,15 @@ G4_CALL(obj_get_property_list) {
 	return out;
 }
 
+/* Node */
+
+// Godot 4's root Window is Godot 2's root Viewport.
+G4_CALL(node_get_window) {
+	Node *n = o->cast_to<Node>();
+	return (n && n->is_inside_tree()) ? Variant(n->get_tree()->get_root()) : Variant();
+}
+G4_CALL(viewport_get_size_with_decorations) { return call0(o, "get_visible_rect").operator Rect2().size; }
+
 /* GUI widgets */
 
 // Godot 4's text is the BBCode source when bbcode_enabled is set.
@@ -1649,6 +1663,47 @@ G4_CALL(option_get_popup) {
 	return Variant();
 }
 
+G4_GET(dialog_get_ok_text) {
+	Object *ok = call0(o, "get_ok");
+	return ok ? ok->call("get_text") : Variant();
+}
+G4_SET(dialog_set_ok_text) {
+	Object *ok = call0(o, "get_ok");
+	if (ok)
+		ok->call("set_text", v);
+}
+
+// Godot 2 TreeItems link to their first child (get_children) and siblings.
+static Array treeitem_children(Object *o) {
+	Array out;
+	Object *c = call0(o, "get_children");
+	while (c) {
+		out.push_back(c);
+		c = c->call("get_next");
+	}
+	return out;
+}
+G4_CALL(treeitem_get_children) { return treeitem_children(o); }
+G4_CALL(treeitem_get_child_count) { return treeitem_children(o).size(); }
+G4_CALL(treeitem_get_child) {
+	Array c = treeitem_children(o);
+	int idx = arg(args, 0);
+	if (idx < 0)
+		idx += c.size();
+	return (idx >= 0 && idx < c.size()) ? c[idx] : Variant();
+}
+G4_CALL(treeitem_get_index) {
+	Object *parent = call0(o, "get_parent");
+	if (!parent)
+		return 0;
+	Array c = treeitem_children(parent);
+	for (int i = 0; i < c.size(); i++) {
+		if ((Object *)c[i] == o)
+			return i;
+	}
+	return -1;
+}
+
 G4_GET(scroll_get_h_mode) { return (bool)call0(o, "is_h_scroll_enabled") ? 1 : 0; } // AUTO : DISABLED
 G4_SET(scroll_set_h_mode) { call1(o, "set_enable_h_scroll", (int)v != 0); }
 G4_GET(scroll_get_v_mode) { return (bool)call0(o, "is_v_scroll_enabled") ? 1 : 0; }
@@ -1659,6 +1714,31 @@ G4_SET(textedit_set_editable) {
 	o->set_meta("_g4_readonly", !(bool)v);
 	call1(o, "set_readonly", !(bool)v);
 }
+// Godot 2 TextEdits color syntax themselves; a CodeHighlighterRef is applied
+// to them. Re-applying is skipped while its colors are unchanged, since code
+// may assign a fresh highlighter every frame.
+G4_GET(textedit_get_syntax_highlighter) {
+	return o->has_meta("_g4_syntax_highlighter") ? o->get_meta("_g4_syntax_highlighter") : Variant();
+}
+G4_SET(textedit_set_syntax_highlighter) {
+	Object *obj = v;
+	CodeHighlighterRef *h = obj ? obj->cast_to<CodeHighlighterRef>() : NULL;
+	o->set_meta("_g4_syntax_highlighter", h ? v : Variant());
+	if (!h) {
+		if (o->has_meta("_g4_highlighter_sig")) {
+			o->set_meta("_g4_highlighter_sig", Variant());
+			call0(o, "clear_colors");
+			call1(o, "set_syntax_coloring", false);
+		}
+		return;
+	}
+	int sig = (int)h->get_signature();
+	if (o->has_meta("_g4_highlighter_sig") && (int)o->get_meta("_g4_highlighter_sig") == sig)
+		return;
+	o->set_meta("_g4_highlighter_sig", sig);
+	h->apply_to(o);
+}
+
 G4_CALL(textedit_get_caret_line) { return call0(o, "cursor_get_line"); }
 G4_CALL(textedit_get_caret_column) { return call0(o, "cursor_get_column"); }
 G4_CALL(textedit_set_caret_line) { return call2(o, "cursor_set_line", arg(args, 0), arg(args, 1, true)); }
@@ -1845,7 +1925,7 @@ static const PropEntry props[] = {
 	{ "ScrollContainer", "scroll_vertical", "get_v_scroll", "set_v_scroll", NULL, NULL },
 	{ "ScrollContainer", "scroll_deadzone", "get_deadzone", "set_deadzone", NULL, NULL },
 	{ "TextEdit", "editable", NULL, NULL, textedit_get_editable, textedit_set_editable },
-	{ "TextEdit", "syntax_highlighter", NULL, NULL, NULL, ignore_set },
+	{ "TextEdit", "syntax_highlighter", NULL, NULL, textedit_get_syntax_highlighter, textedit_set_syntax_highlighter },
 	{ "TextEdit", "highlight_all_occurrences", "is_highlight_all_occurrences_enabled", "set_highlight_all_occurrences", NULL, NULL },
 	{ "TextEdit", "caret_blink", "cursor_get_blink_enabled", "cursor_set_blink_enabled", NULL, NULL },
 	{ "TextEdit", "caret_blink_interval", "cursor_get_blink_speed", "cursor_set_blink_speed", NULL, NULL },
@@ -1890,6 +1970,8 @@ static const PropEntry props[] = {
 	{ "OptionButton", "selected", "get_selected", "select", NULL, NULL },
 	{ "TextureFrame", "expand", "has_expand", "set_expand", NULL, NULL },
 	{ "Popup", "exclusive", "is_exclusive", "set_exclusive", NULL, NULL },
+	{ "Popup", "min_size", "get_custom_minimum_size", "set_custom_minimum_size", NULL, NULL },
+	{ "AcceptDialog", "ok_button_text", NULL, NULL, dialog_get_ok_text, dialog_set_ok_text },
 	{ "WindowDialog", "title", "get_title", "set_title", NULL, NULL },
 	{ "AcceptDialog", "dialog_text", "get_text", "set_text", NULL, NULL },
 	{ "AcceptDialog", "dialog_hide_on_ok", "get_hide_on_ok", "set_hide_on_ok", NULL, NULL },
@@ -2060,9 +2142,16 @@ static const MetaEntry meta_props[] = {
 	{ "WindowDialog", "always_on_top", 'b', 0 },
 	{ "WindowDialog", "popup_window", 'b', 0 },
 	{ "WindowDialog", "wrap_controls", 'b', 0 },
-	{ "AcceptDialog", "ok_button_text", 'n', 0 },
 	{ "AcceptDialog", "dialog_close_on_escape", 'b', 1 },
 	{ "AcceptDialog", "dialog_autowrap", 'b', 0 },
+	{ "TreeItem", "visible", 'b', 1 },
+	{ "TreeItem", "disable_folding", 'b', 0 },
+	{ "Viewport", "content_scale_factor", 'f', 1 },
+	{ "Viewport", "content_scale_mode", 'i', 0 },
+	{ "Viewport", "content_scale_aspect", 'i', 0 },
+	{ "Viewport", "borderless", 'b', 0 },
+	{ "Viewport", "gui_embed_subwindows", 'b', 1 },
+	{ "Popup", "content_scale_factor", 'f', 1 },
 	{ "CanvasItem", "z_index", 'i', 0 },
 	{ "CanvasItem", "self_modulate", 'c', 0 },
 	{ "CanvasItem", "clip_children", 'i', 0 },
@@ -2286,8 +2375,18 @@ static const CallEntry calls[] = {
 	{ "TextEdit", "get_word_under_caret", "get_word_under_cursor", NULL },
 	{ "LineEdit", "insert_text_at_caret", "append_at_cursor", NULL },
 	{ "ScrollContainer", "ensure_control_visible", NULL, noop },
-	// Object
+	{ "TreeItem", "get_first_child", "get_children", NULL },
+	{ "TreeItem", "get_children", NULL, treeitem_get_children },
+	{ "TreeItem", "get_child_count", NULL, treeitem_get_child_count },
+	{ "TreeItem", "get_child", NULL, treeitem_get_child },
+	{ "TreeItem", "get_index", NULL, treeitem_get_index },
+	{ "TreeItem", "get_next_in_tree", "get_next_visible", NULL },
+	{ "TreeItem", "get_prev_in_tree", "get_prev_visible", NULL },
+	// Object, Node, Viewport (as Godot 4's root Window)
 	{ "Object", "get_property_list", NULL, obj_get_property_list },
+	{ "Node", "get_window", NULL, node_get_window },
+	{ "Node", "get_last_exclusive_window", NULL, node_get_window },
+	{ "Viewport", "get_size_with_decorations", NULL, viewport_get_size_with_decorations },
 	// Textures (Image values are wrapped as ImageRef in Lua)
 	{ "ImageTexture", "set_image", "set_data", NULL },
 	{ "ImageTexture", "update", "set_data", NULL },
@@ -2458,7 +2557,7 @@ Dictionary manifest() {
 		manifest_add(out, signal_aliases[i][0], "signals", signal_aliases[i][1]);
 	// Module classes standing in for Godot 4 classes implement Godot 4
 	// methods under their own names.
-	const char *backing[] = { "InputEventRef", "ImageRef", NULL };
+	const char *backing[] = { "InputEventRef", "ImageRef", "CodeHighlighterRef", NULL };
 	for (int i = 0; backing[i]; i++) {
 		List<MethodInfo> methods;
 		ObjectTypeDB::get_method_list(backing[i], &methods, true);
